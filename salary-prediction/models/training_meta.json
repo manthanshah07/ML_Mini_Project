@@ -1,0 +1,29 @@
+{
+  "best_model": "Ridge",
+  "best_params": {
+    "model__alpha": 1.0
+  },
+  "log_target": true,
+  "cv_scores": {
+    "Ridge": {
+      "cv_mae_inr": 102008.50224585379,
+      "cv_std_inr": 14768.034956157951
+    },
+    "Lasso": {
+      "cv_mae_inr": 102097.99819495025,
+      "cv_std_inr": 14676.823065671184
+    },
+    "RandomForest": {
+      "cv_mae_inr": 187483.5,
+      "cv_std_inr": 20697.032688701718
+    },
+    "XGBoost": {
+      "cv_mae_inr": 136968.35234374998,
+      "cv_std_inr": 9680.256022207692
+    },
+    "GradientBoosting": {
+      "cv_mae_inr": 132534.2317833058,
+      "cv_std_inr": 14931.880996320939
+    }
+  }
+}

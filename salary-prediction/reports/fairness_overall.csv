@@ -1,0 +1,5 @@
+,y_pred,y_pred,abs_error,abs_error,residual,residual
+,mean,count,mean,count,mean,count
+Gender,,,,,,
+Female,1345546.0,49,133181.0,49,-31465.0,49
+Male,1122983.0,51,97643.0,51,-16590.0,51
