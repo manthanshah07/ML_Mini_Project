@@ -87,7 +87,10 @@ def load_feature_names():
 def load_shap_explainer():
     expl_path = MODELS_DIR / "shap_explainer.joblib"
     if expl_path.exists():
-        return joblib.load(expl_path)
+        try:
+            return joblib.load(expl_path)
+        except Exception:
+            return None
     return None
 
 
