@@ -238,9 +238,12 @@ st.markdown("""
     .stButton > button:hover { background: #285B55; color: white; }
     /* ── Use-case cards ──────────────────────────────────────────────────── */
     .use-case-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 1rem 1.1rem; height: 100%; }
-    .use-case-card .card-icon { font-size: 1.4rem; margin-bottom: .35rem; }
+    .use-case-card .card-icon { font-size: 1.6rem; line-height: 1; margin-bottom: .45rem; display: block; }
     .use-case-card .card-title { color: var(--teal); font-weight: 700; font-size: .9rem; margin-bottom: .3rem; }
     .use-case-card .card-body { color: var(--muted); font-size: .82rem; line-height: 1.45; }
+    /* ── st.info override ────────────────────────────────────────────────── */
+    [data-testid="stNotification"] { background: color-mix(in srgb, var(--teal) 12%, var(--paper)); border-left: 3px solid var(--teal); }
+    [data-testid="stNotification"] p { color: var(--ink) !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -350,7 +353,7 @@ for _col, (_icon, _title, _body) in zip(_uc_row1, _USE_CASES[:3]):
     with _col:
         st.markdown(
             f"""<div class="use-case-card">
-                <div class="card-icon">{_icon}</div>
+                <span class="card-icon" style="font-size:1.6rem;line-height:1;display:block;margin-bottom:.45rem">{_icon}</span>
                 <div class="card-title">{_title}</div>
                 <div class="card-body">{_body}</div>
             </div>""",
@@ -361,7 +364,7 @@ for _col, (_icon, _title, _body) in zip(_uc_row2, _USE_CASES[3:]):
     with _col:
         st.markdown(
             f"""<div class="use-case-card">
-                <div class="card-icon">{_icon}</div>
+                <span class="card-icon" style="font-size:1.6rem;line-height:1;display:block;margin-bottom:.45rem">{_icon}</span>
                 <div class="card-title">{_title}</div>
                 <div class="card-body">{_body}</div>
             </div>""",
