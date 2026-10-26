@@ -28,3 +28,6 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
+
+      - name: Smoke-test inference artifacts
+        run: python -m src.predict

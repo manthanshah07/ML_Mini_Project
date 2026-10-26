@@ -22,7 +22,6 @@ Run with:
 
 import json
 import pathlib
-import warnings
 from typing import Dict, Tuple
 
 import joblib
@@ -37,11 +36,10 @@ from src.preprocess import (
     DATA_PATH,
     RANDOM_STATE,
     data_sha256,
+    file_sha256,
     load_data,
     split_data,
 )
-
-warnings.filterwarnings("ignore")
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "models"
@@ -333,6 +331,7 @@ def main() -> None:
             {
                 "artifact_schema_version": meta.get("artifact_schema_version", 1),
                 "data_sha256": meta.get("data_sha256"),
+                "model_sha256": meta.get("model_sha256") or file_sha256(MODELS_DIR / "best_model.joblib"),
                 "error_band_inr": meta.get("error_band_inr"),
                 "error_band_quantile": meta.get("error_band_quantile"),
                 "best_model": best_name,

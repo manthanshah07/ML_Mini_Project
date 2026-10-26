@@ -5,8 +5,8 @@ Streamlit web application for the Salary Prediction model.
 
 Features:
   - Input form with dropdowns and sliders for all 12 features
-  - Predicted salary displayed in Indian lakh format with approx. range
-  - SHAP top-factors bar chart for the current prediction (top factor at top)
+  - Predicted salary displayed in Indian lakh format with an empirical error band
+   - Readable factor comparison for the current prediction
   - Profile validation alerts (e.g. experience vs age checks)
   - Loads saved joblib pipeline — does NOT retrain
 
@@ -17,45 +17,60 @@ Run with:
 import json
 import pathlib
 import sys
-import warnings
 
 import joblib
-import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import streamlit as st
-
-warnings.filterwarnings("ignore")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from src.interpretation import (
+    counterfactual_impacts,
+    local_shap_factors,
+    typical_profile,
+)
+from src.preprocess import (
+    CITY_VALUES,
+    COMPANY_SIZE_VALUES,
+    DATA_PATH,
+    EDUCATION_ORDER,
+    GENDER_VALUES,
+    INDUSTRY_VALUES,
+    JOB_TITLE_VALUES,
+    JOB_LEVEL_ORDER,
+    WORK_MODE_VALUES,
+    data_sha256,
+    file_sha256,
+    load_data,
+)
+
+st.set_page_config(
+    page_title="Salary / Predictor",
+    page_icon="◌",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
 from src.predict import (
     format_inr_lakhs,
-    get_prediction_error_band,
     predict_with_interval,
     validate_profile,
 )
-from src.preprocess import DATA_PATH, data_sha256
-
 MODELS_DIR = ROOT / "models"
 REPORTS_DIR = ROOT / "reports"
 
-# ── Allowed values (from dataset spec) ───────────────────────────────────────
-EDUCATION_LEVELS = ["High School", "Bachelor's", "Master's", "PhD"]
-JOB_LEVELS = ["Junior", "Mid", "Senior", "Lead", "Manager"]
-JOB_TITLES = [
-    "Software Engineer", "Data Scientist", "Data Analyst", "DevOps Engineer",
-    "Product Manager", "Business Analyst", "UI/UX Designer", "HR Executive",
-    "Marketing Manager", "Sales Executive",
-]
-INDUSTRIES = ["IT", "Finance", "Healthcare", "EdTech", "E-commerce", "Manufacturing"]
-CITIES = ["Bangalore", "Delhi", "Chennai", "Hyderabad", "Pune", "Mumbai", "Remote"]
-COMPANY_SIZES = ["Startup", "Mid-size", "Enterprise"]
-WORK_MODES = ["On-site", "Hybrid", "Remote"]
-GENDERS = ["Male", "Female"]
+# ── Allowed values (shared with preprocessing and validation) ────────────────
+EDUCATION_LEVELS = EDUCATION_ORDER
+JOB_LEVELS = JOB_LEVEL_ORDER
+JOB_TITLES = JOB_TITLE_VALUES
+INDUSTRIES = INDUSTRY_VALUES
+CITIES = CITY_VALUES
+COMPANY_SIZES = COMPANY_SIZE_VALUES
+WORK_MODES = WORK_MODE_VALUES
+GENDERS = GENDER_VALUES
 
 
 # ── Loaders (cached) ─────────────────────────────────────────────────────────
@@ -84,12 +99,27 @@ def load_feature_names():
             return json.load(f)
     return []
 
+
+@st.cache_data
+def load_reference_profile():
+    return typical_profile(load_data(DATA_PATH))
+
 @st.cache_resource
 def load_shap_explainer():
     expl_path = MODELS_DIR / "shap_explainer.joblib"
+    meta_path = MODELS_DIR / "explainability_meta.json"
     if expl_path.exists():
         try:
-            return joblib.load(expl_path)
+            explainer = joblib.load(expl_path)
+            if not meta_path.exists():
+                return None
+            with open(meta_path) as f:
+                explain_meta = json.load(f)
+            if explain_meta.get("data_sha256") != data_sha256(DATA_PATH):
+                return None
+            if explain_meta.get("model_sha256") != file_sha256(MODELS_DIR / "best_model.joblib"):
+                return None
+            return explainer
         except Exception as exc:
             st.warning(f"SHAP explainer could not be loaded: {exc}")
             return None
@@ -105,6 +135,9 @@ def get_shap_values_for_input(estimator, explainer, input_dict: dict, feature_na
     input_df = pd.DataFrame([input_dict])
     preprocess_pipe = estimator.named_steps["preprocess"]
     X_transformed = preprocess_pipe.transform(input_df)
+    if X_transformed.shape[1] != len(feature_names):
+        st.warning("The explanation artifacts do not match the loaded model.")
+        return None, None
 
     try:
         sv = explainer(X_transformed, check_additivity=False)
@@ -121,137 +154,50 @@ def get_shap_values_for_input(estimator, explainer, input_dict: dict, feature_na
             return None, None
 
 
-def plot_shap_bar(
-    shap_vals: np.ndarray,
-    feature_names: list,
-    target_label: str,
-) -> plt.Figure:
-    """Top-10 SHAP feature bar chart with most important driver placed at the top."""
-    n = min(10, len(shap_vals))
-    abs_vals = np.abs(shap_vals)
-    top_idx = np.argsort(abs_vals)[::-1][:n]
+def plot_factor_bar(factors: pd.DataFrame) -> plt.Figure:
+    """Render a clean INR comparison against a typical training profile."""
+    factors = factors.sort_values("impact_inr")
+    labels = [f"{row.label} · {row.value}" for row in factors.itertuples()]
+    values = factors["impact_inr"].to_numpy() / 1e5
+    colors = ["#356F68" if value >= 0 else "#C56A54" for value in values]
 
-    top_names = [feature_names[i] for i in top_idx]
-    top_vals = [shap_vals[i] for i in top_idx]
-
-    colors = ["#C44E52" if v > 0 else "#4C72B0" for v in top_vals]
-
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    fig.patch.set_facecolor("#0E1117")
-    ax.set_facecolor("#0E1117")
-
-    bars = ax.barh(
-        range(n),
-        top_vals,
-        color=colors,
-        edgecolor="none",
-        height=0.65,
-    )
-    ax.set_yticks(range(n))
-    ax.set_yticklabels(top_names, fontsize=10, color="white")
-    ax.invert_yaxis()  # Place the #1 driver at the top
-    ax.set_xlabel(f"SHAP value (Impact on {target_label})", fontsize=9, color="#AAAAAA")
-    ax.set_title("Top Factors Influencing This Prediction", fontsize=11, color="white", pad=10)
-    ax.tick_params(colors="white")
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.spines["left"].set_color("#333333")
-    ax.spines["bottom"].set_color("#333333")
-    ax.axvline(0, color="#555555", linewidth=0.8)
-
-    pos_patch = mpatches.Patch(color="#C44E52", label="↑ Pushes salary higher")
-    neg_patch = mpatches.Patch(color="#4C72B0", label="↓ Pushes salary lower")
-    ax.legend(handles=[pos_patch, neg_patch], fontsize=8, facecolor="#1A1A2E", labelcolor="white",
-              loc="lower right")
-
+    fig, ax = plt.subplots(figsize=(7.2, 4.8))
+    fig.patch.set_facecolor("#F7F5F0")
+    ax.set_facecolor("#F7F5F0")
+    ax.barh(labels, values, color=colors, height=0.58)
+    ax.axvline(0, color="#8A9690", linewidth=0.9)
+    ax.set_xlabel("Change in estimate versus a typical profile (₹ lakhs)", color="#52615C")
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda value, _: f"₹{value:.1f}L"))
+    ax.tick_params(axis="both", colors="#34423D", labelsize=9)
+    ax.grid(axis="x", color="#D9DDD7", linewidth=0.8)
+    ax.set_axisbelow(True)
+    for spine in ("top", "right", "left"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["bottom"].set_color("#B8C1BB")
+    ax.set_title("What changes this estimate?", loc="left", color="#1F2A2E", fontsize=12, pad=12)
     plt.tight_layout()
     return fig
 
 
-# ── Page config ───────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Salary Predictor — India",
-    page_icon="💼",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-
-    .main-header {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-        border-radius: 16px;
-        padding: 2rem 2.5rem;
-        margin-bottom: 1.5rem;
-        border: 1px solid #2a2a4a;
-    }
-    .main-header h1 {
-        font-size: 2.2rem;
-        font-weight: 700;
-        background: linear-gradient(90deg, #e94560, #0f3460);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0 0 0.4rem 0;
-    }
-    .main-header p { color: #AAAACC; font-size: 0.95rem; margin: 0; }
-
-    .result-card {
-        background: linear-gradient(135deg, #1a1a2e, #16213e);
-        border: 1px solid #2a2a4a;
-        border-radius: 14px;
-        padding: 1.8rem;
-        text-align: center;
-        margin: 0.5rem 0;
-    }
-    .salary-number {
-        font-size: 3.2rem;
-        font-weight: 700;
-        color: #e94560;
-        line-height: 1.1;
-    }
-    .salary-range {
-        font-size: 1rem;
-        color: #8888AA;
-        margin-top: 0.4rem;
-    }
-    .metric-row {
-        display: flex;
-        gap: 1rem;
-        margin-top: 1rem;
-    }
-    .metric-pill {
-        background: #0f3460;
-        border-radius: 8px;
-        padding: 0.5rem 1rem;
-        color: #CCCCEE;
-        font-size: 0.85rem;
-        flex: 1;
-        text-align: center;
-    }
-    .disclaimer {
-        background: #1A1A2E;
-        border-left: 3px solid #e94560;
-        border-radius: 0 8px 8px 0;
-        padding: 0.8rem 1rem;
-        color: #AAAAAA;
-        font-size: 0.82rem;
-        margin-top: 1rem;
-    }
-    .section-label {
-        font-size: 0.75rem;
-        font-weight: 600;
-        color: #8888AA;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        margin-bottom: 0.3rem;
-    }
-    div[data-testid="stSlider"] > div > div > div { color: #e94560; }
-    .stSelectbox label, .stSlider label { color: #CCCCEE !important; font-size: 0.9rem; }
+    :root { --ink: #1F2A2E; --muted: #64736D; --paper: #F7F5F0; --line: #D9DDD7; --teal: #356F68; }
+    .stApp { background: var(--paper); color: var(--ink); }
+    [data-testid="stHeader"] { background: transparent; }
+    .block-container { max-width: 1180px; padding-top: 3rem; padding-bottom: 4rem; }
+    .eyebrow { color: var(--teal); font-size: .75rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+    .intro { border-bottom: 1px solid var(--line); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+    .intro h1 { color: var(--ink); font-size: 2.8rem; letter-spacing: -.04em; margin: .35rem 0 .5rem; }
+    .intro p { color: var(--muted); font-size: 1rem; max-width: 42rem; margin: 0; }
+    .section-note { color: var(--muted); font-size: .88rem; margin-top: -.5rem; }
+    div[data-testid="stForm"] { border: 1px solid var(--line); border-radius: 14px; padding: 1.35rem 1.5rem; background: rgba(255,255,255,.42); }
+    [data-testid="stMetric"] { background: #FFFFFF; border: 1px solid var(--line); border-radius: 12px; padding: 1rem; }
+    [data-testid="stMetricLabel"] { color: var(--muted); }
+    [data-testid="stMetricValue"] { color: var(--teal); }
+    .fine-print { color: var(--muted); font-size: .8rem; line-height: 1.5; }
+    .stButton > button { background: var(--teal); border: 0; border-radius: 8px; color: white; font-weight: 600; }
+    .stButton > button:hover { background: #285B55; color: white; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -274,84 +220,75 @@ best_model_name = meta.get("best_model", "Ridge")
 if meta.get("data_sha256") and meta["data_sha256"] != data_sha256(DATA_PATH):
     st.error("The dataset changed after this model was trained. Retrain the model before use.")
     st.stop()
-if metrics.get("best_model") != best_model_name:
+if meta.get("model_sha256") and meta["model_sha256"] != file_sha256(MODELS_DIR / "best_model.joblib"):
+    st.error("The model artifact does not match its metadata. Regenerate the model artifacts.")
+    st.stop()
+if (
+    metrics.get("best_model") != best_model_name
+    or metrics.get("data_sha256") != meta.get("data_sha256")
+    or metrics.get("model_sha256") != meta.get("model_sha256")
+):
     metrics = {}
 best_cv_info = meta.get("cv_scores", {}).get(best_model_name, {})
 test_mae = metrics.get("test_mae_inr", best_cv_info.get("test_mae_inr"))
-error_band = metrics.get("error_band_inr")
+error_band = metrics.get("error_band_inr", meta.get("error_band_inr"))
 test_r2 = metrics.get("test_r2", best_cv_info.get("test_r2", None))
 test_rmse = metrics.get("test_rmse_inr", best_cv_info.get("test_rmse_inr", None))
 if test_mae is None:
     st.error("No matching error metric is available for the loaded model.")
     st.stop()
-if error_band is None:
-    error_band = get_prediction_error_band()
-shap_target_label = "log-salary" if meta.get("log_target") else "salary"
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div class="main-header">
-    <h1>💼 Salary Predictor — India</h1>
-    <p>Estimate your annual salary in INR based on your profile using machine learning.
-    Fill in the form below and hit <strong>Predict</strong>.</p>
-</div>
-""", unsafe_allow_html=True)
+st.markdown('<div class="intro"><div class="eyebrow">Salary / Predictor</div>', unsafe_allow_html=True)
+st.title("A calmer way to estimate salary")
+st.markdown(
+    "Use the profile below to explore a base-salary estimate from the project’s "
+    "training data. The result is a guide, not a salary benchmark."
+)
+st.markdown("</div>", unsafe_allow_html=True)
 
+with st.expander("About this model"):
+    model_col, data_col = st.columns(2)
+    with model_col:
+        st.markdown(f"**Selected model:** {best_model_name}")
+        if test_r2 is not None:
+            st.markdown(f"**Held-out R²:** {test_r2:.4f}")
+        st.markdown(f"**Held-out MAE:** {format_inr_lakhs(test_mae)}")
+    with data_col:
+        st.markdown("**Training data:** 500 synthetic employee profiles")
+        st.markdown("**Target:** base annual salary in INR")
+        st.markdown("The model excludes bonuses, equity, and market changes.")
 
-# ── Sidebar: model info ───────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### 🤖 Model Info")
-    st.markdown(f"**Best model:** `{best_model_name}`")
-    if test_r2 is not None:
-        st.markdown(f"**Test R²:** `{test_r2:.4f}`")
-    if test_rmse is not None:
-        st.markdown(f"**Test RMSE:** `{format_inr_lakhs(test_rmse)}`")
-    st.markdown(f"**Test MAE:** `{format_inr_lakhs(test_mae)}`")
-    st.divider()
-    st.markdown("### 📊 Dataset")
-    st.markdown(
-        "500 employees · 12 features · Indian tech/corporate salary benchmark model."
-    )
-    st.divider()
-    st.markdown("### ⚠️ Disclaimer")
-    st.caption(
-        "This is an educational ML project built on a 500-row dataset. "
-        "Predictions should not be used as authoritative salary negotiations. "
-        "The model predicts base annual salary and does not include bonuses or equity."
-    )
+st.subheader("Build a profile")
+st.markdown("<div class='section-note'>All fields are used by the trained model.</div>", unsafe_allow_html=True)
 
+with st.form("salary_profile"):
+    personal_col, role_col = st.columns(2, gap="large")
+    with personal_col:
+        st.markdown("**Personal profile**")
+        age = st.slider("Age", min_value=21, max_value=57, value=30, step=1)
+        gender = st.selectbox("Gender", GENDERS, index=0)
+        education = st.selectbox("Education level", EDUCATION_LEVELS, index=1)
+        years_exp = st.slider("Years of experience", 0, 35, 7, 1)
+    with role_col:
+        st.markdown("**Role and workplace**")
+        job_title = st.selectbox("Job title", JOB_TITLES, index=0)
+        job_level = st.selectbox("Job level", JOB_LEVELS, index=1)
+        industry = st.selectbox("Industry", INDUSTRIES, index=0)
+        city = st.selectbox("Location", CITIES, index=0)
+        company_size = st.selectbox("Company size", COMPANY_SIZES, index=1)
+        work_mode = st.selectbox("Work mode", WORK_MODES, index=1)
 
-# ── Input form ────────────────────────────────────────────────────────────────
-st.markdown("### 📝 Your Profile")
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    age = st.slider("Age", min_value=21, max_value=57, value=30, step=1)
-    gender = st.selectbox("Gender", GENDERS, index=0)
-    education = st.selectbox("Education Level", EDUCATION_LEVELS, index=1)
-    # Dynamic recommended max experience
-    max_reasonable_exp = max(0, age - 18)
-    years_exp = st.slider("Years of Experience", 0, 35, min(7, max_reasonable_exp), 1)
-
-with col2:
-    job_title = st.selectbox("Job Title", JOB_TITLES, index=0)
-    job_level = st.selectbox("Job Level", JOB_LEVELS, index=1)
-    industry = st.selectbox("Industry", INDUSTRIES, index=0)
-    city = st.selectbox("City", CITIES, index=0)
-
-with col3:
-    company_size = st.selectbox("Company Size", COMPANY_SIZES, index=1)
-    work_mode = st.selectbox("Work Mode", WORK_MODES, index=1)
-    certs = st.slider("Certifications Count", 0, 5, 2, 1)
-    skills = st.slider("Skills Count", 2, 14, 8, 1)
-
-
-# ── Predict button ─────────────────────────────────────────────────────────────
-st.markdown("---")
-predict_col, _ = st.columns([1, 2])
-with predict_col:
-    predict_btn = st.button("🔮 Predict Salary", type="primary")
+    skills_col, action_col = st.columns([2, 1], gap="large")
+    with skills_col:
+        st.markdown("**Skills and credentials**")
+        certs = st.slider("Certifications", 0, 5, 2, 1)
+        skills = st.slider("Skills", 2, 14, 8, 1)
+    with action_col:
+        st.markdown("**Ready?**")
+        st.markdown("<div class='fine-print'>Run the estimate when your profile is complete.</div>", unsafe_allow_html=True)
+        predict_btn = st.form_submit_button("Estimate salary", type="primary", width="stretch")
 
 if predict_btn:
     input_dict = {
@@ -376,67 +313,63 @@ if predict_btn:
             st.error(f"⚠️ {error}")
         st.stop()
 
-    with st.spinner("Predicting …"):
+    with st.spinner("Calculating …"):
         pred, lower, upper = predict_with_interval(input_dict, error_band)
         shap_vals, feat_names = get_shap_values_for_input(
             estimator, explainer, input_dict, feature_names
         )
+        factors = counterfactual_impacts(
+            estimator,
+            input_dict,
+            load_reference_profile(),
+        ).head(6)
 
-    # ── Result card ───────────────────────────────────────────────────────────
-    res_col, exp_col = st.columns([1, 1.3], gap="large")
+    # ── Result and explanation ────────────────────────────────────────────────
+    res_col, exp_col = st.columns([0.85, 1.35], gap="large")
 
     with res_col:
-        st.markdown(f"""
-        <div class="result-card">
-            <div class="section-label">Predicted Annual Salary</div>
-            <div class="salary-number">{format_inr_lakhs(pred)}</div>
-            <div class="salary-range">
-                Empirical error band: {format_inr_lakhs(lower)} – {format_inr_lakhs(upper)}
-            </div>
-            <div class="metric-row">
-                <div class="metric-pill">₹ {pred:,.0f} / year</div>
-                <div class="metric-pill">± {format_inr_lakhs(error_band)} (typical error)</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("""
-        <div class="disclaimer">
-            💡 Range is an empirical error band, not a guaranteed prediction interval. This
-            estimate reflects base compensation patterns in the training data.
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Key inputs summary
-        st.markdown("**Your profile summary:**")
-        summary_data = {
-            "Field": ["Job Title", "Level", "Experience", "City", "Education"],
-            "Value": [job_title, job_level, f"{years_exp} yrs", city, education],
-        }
-        st.dataframe(pd.DataFrame(summary_data), hide_index=True)
+        st.markdown("**Estimated base salary**")
+        st.metric("Annual estimate", format_inr_lakhs(pred))
+        st.caption(f"Typical error band: {format_inr_lakhs(lower)} – {format_inr_lakhs(upper)}")
+        st.caption("This is an empirical band, not a guaranteed prediction interval.")
+        st.markdown("**Profile summary**")
+        summary_data = pd.DataFrame(
+            {
+                "Field": ["Role", "Level", "Experience", "Location", "Education"],
+                "Value": [job_title, job_level, f"{years_exp} yrs", city, education],
+            }
+        )
+        st.dataframe(summary_data, hide_index=True, width="stretch")
 
     with exp_col:
-        st.markdown("### 🔍 What Drives This Prediction?")
+        st.markdown("**What changes this estimate?**")
+        fig = plot_factor_bar(factors)
+        st.pyplot(fig, width="stretch")
+        plt.close(fig)
+        st.caption(
+            "Each bar compares this profile with a typical training profile while changing one "
+            "field at a time. It describes the model, not a causal salary effect."
+        )
         if shap_vals is not None and feat_names:
-            fig = plot_shap_bar(shap_vals, feat_names, shap_target_label)
-            st.pyplot(fig)
-            plt.close(fig)
-            st.caption(
-                f"Red bars push the {shap_target_label} output **higher**; "
-                "blue bars push it **lower**. "
-                "The most influential factor is at the top."
-            )
-        else:
-            st.info("SHAP explainer not available. Run `python -m src.explain` first.")
+            with st.expander("Technical SHAP view"):
+                technical = local_shap_factors(shap_vals, feat_names, input_dict)
+                technical["value"] = technical["value"].astype(str)
+                st.dataframe(
+                    technical[["label", "value", "impact"]].rename(
+                        columns={"label": "Factor", "value": "Selected value", "impact": "Model-score impact"}
+                    ),
+                    hide_index=True,
+                    width="stretch",
+                )
 
 else:
-    st.info("👆 Fill in your profile above and click **Predict Salary** to get your estimate.")
+    st.info("Complete the profile above and select **Estimate salary** to see the result.")
 
     # Show model comparison from reports if available
     comp_path = REPORTS_DIR / "model_comparison.csv"
     if comp_path.exists():
         st.markdown("---")
-        st.markdown("### 📈 Model Performance Summary")
+        st.markdown("### Model performance")
         comp_df = pd.read_csv(comp_path, index_col=0)
         display_df = comp_df.copy()
         for col in display_df.columns:
@@ -449,6 +382,4 @@ else:
                     lambda x: f"{x:.4f}" if pd.notna(x) else "—"
                 )
         st.dataframe(display_df)
-        st.caption(
-            f"✓ **{best_model_name}** selected as best model by 5-fold CV MAE."
-        )
+        st.caption(f"{best_model_name} was selected using 5-fold cross-validation MAE.")

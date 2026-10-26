@@ -16,7 +16,6 @@ Run with:
 
 import json
 import pathlib
-import warnings
 from typing import Any, Tuple
 
 import joblib
@@ -32,12 +31,12 @@ from src.preprocess import (
     DATA_PATH,
     RANDOM_STATE,
     data_sha256,
+    file_sha256,
     get_feature_names,
     load_data,
     split_data,
 )
-
-warnings.filterwarnings("ignore")
+from src.interpretation import aggregate_shap_values
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "models"
@@ -130,7 +129,7 @@ def plot_shap(
     X_train: pd.DataFrame,
     X_test: pd.DataFrame,
     best_name: str,
-) -> Tuple[Any, Any, list[str]]:
+) -> Tuple[Any, Any, list[str], pd.DataFrame]:
     """Compute SHAP values and produce summary + bar plots."""
     preprocess_pipe = estimator.named_steps["preprocess"]
     feature_names = get_feature_names(preprocess_pipe)
@@ -164,34 +163,51 @@ def plot_shap(
         max_display=20,
         plot_size=None,
     )
-    plt.title(f"SHAP Summary Plot — {best_name} (Impact on {target_label})", fontsize=12, pad=12)
+    plt.title(
+        f"Technical SHAP Detail — {best_name} (Impact on {target_label})\n"
+        "Encoded model features; grouped view is shown in shap_bar.png",
+        fontsize=12,
+        pad=12,
+    )
     plt.tight_layout()
     path = FIGURES_DIR / "shap_summary.png"
     plt.savefig(path, dpi=DPI, bbox_inches="tight")
     plt.close()
     print(f"  Saved: {path}")
 
-    # ── SHAP Bar (mean |SHAP|) ────────────────────────────────────────────────
-    shap.summary_plot(
-        shap_values.values if hasattr(shap_values, "values") else shap_values,
-        X_test_t,
-        feature_names=fn,
-        plot_type="bar",
-        show=False,
-        max_display=20,
-        plot_size=None,
+    # ── Grouped SHAP Bar (mean |SHAP|) ───────────────────────────────────────
+    raw_shap_values = shap_values.values if hasattr(shap_values, "values") else shap_values
+    grouped = aggregate_shap_values(raw_shap_values, fn).head(12).sort_values("mean_abs_shap")
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.barh(grouped["label"], grouped["mean_abs_shap"], color="#356F68")
+    ax.set_xlabel("Mean absolute SHAP value (model output scale)")
+    ax.set_title(
+        f"Grouped SHAP Importance — {best_name}\n"
+        f"(Impact on {target_label}; encoded categories combined)",
+        fontsize=12,
     )
-    plt.title(f"SHAP Mean |SHAP| — {best_name} (Magnitude of Impact)", fontsize=12, pad=12)
+    ax.grid(axis="x", alpha=0.25)
+    ax.set_axisbelow(True)
     plt.tight_layout()
     path = FIGURES_DIR / "shap_bar.png"
     plt.savefig(path, dpi=DPI, bbox_inches="tight")
     plt.close()
     print(f"  Saved: {path}")
 
-    return shap_values, explainer, fn
+    return shap_values, explainer, fn, grouped
 
 
 # ── Fairness check ────────────────────────────────────────────────────────────
+
+def _bootstrap_mean_interval(values: pd.Series, seed: int = RANDOM_STATE) -> tuple[float, float]:
+    """Return a percentile bootstrap interval for a group mean."""
+    values = values.dropna().to_numpy(dtype=float)
+    if len(values) < 2:
+        return np.nan, np.nan
+    rng = np.random.default_rng(seed)
+    samples = rng.choice(values, size=(2000, len(values)), replace=True).mean(axis=1)
+    return tuple(np.quantile(samples, [0.025, 0.975]))
+
 
 def fairness_check(
     estimator,
@@ -217,26 +233,49 @@ def fairness_check(
         analysis_df["Years_Experience"], q=4, labels=["Q1", "Q2", "Q3", "Q4"]
     )
 
-    # Overall Male vs Female summary
+    # Overall Male vs Female summary with uncertainty for mean absolute error.
     overall = (
-        analysis_df.groupby("Gender")[["y_pred", "abs_error", "residual"]]
-        .agg(["mean", "count"])
-        .round(0)
+        analysis_df.groupby("Gender")
+        .agg(
+            n=("Gender", "size"),
+            predicted_salary_mean=("y_pred", "mean"),
+            absolute_error_mean=("abs_error", "mean"),
+            residual_mean=("residual", "mean"),
+        )
+        .reset_index()
     )
+    intervals = overall["Gender"].map(
+        {
+            gender: _bootstrap_mean_interval(
+                analysis_df.loc[analysis_df["Gender"] == gender, "abs_error"],
+                seed=RANDOM_STATE + index,
+            )
+            for index, gender in enumerate(overall["Gender"])
+        }
+    )
+    overall[["absolute_error_ci_low", "absolute_error_ci_high"]] = pd.DataFrame(
+        intervals.tolist(), index=overall.index
+    )
+    overall = overall.round(0)
 
     # Controlled for experience band and job level with sample counts
     controlled = (
-        analysis_df.groupby(["Gender", "exp_band", "Job_Level"])[
-            ["y_pred", "abs_error", "residual"]
-        ]
-        .agg(["mean", "count"])
+        analysis_df.groupby(["Gender", "exp_band", "Job_Level"], observed=True)
+        .agg(
+            n=("Gender", "size"),
+            predicted_salary_mean=("y_pred", "mean"),
+            absolute_error_mean=("abs_error", "mean"),
+            residual_mean=("residual", "mean"),
+        )
+        .reset_index()
         .round(0)
     )
+    controlled["small_group"] = controlled["n"] < 10
 
     print("\n  Fairness Check — Overall (Male vs Female):")
     print(overall.to_string())
     print("\n  Fairness Check — Controlled (exp band × job level):")
-    print(controlled.head(15).to_string())
+    print(controlled.head(15).to_string(index=False))
     print(
         "\n  ⚠ Note: Dataset has 500 rows; group sizes are small. Differences "
         "reflect sampling variance as much as true effects. No causal claims."
@@ -282,7 +321,7 @@ def main() -> None:
 
     # SHAP
     print("\nComputing SHAP values …")
-    shap_values, explainer, feature_names = plot_shap(
+    shap_values, explainer, feature_names, grouped = plot_shap(
         estimator, X_train, X_test, best_name
     )
 
@@ -293,6 +332,19 @@ def main() -> None:
     # Save feature names
     with open(MODELS_DIR / "feature_names.json", "w") as f:
         json.dump(feature_names, f)
+    grouped.to_csv(ROOT / "reports" / "shap_grouped_importance.csv", index=False)
+
+    with open(MODELS_DIR / "explainability_meta.json", "w") as f:
+        json.dump(
+            {
+                "data_sha256": data_sha256(DATA_PATH),
+                "model_sha256": file_sha256(MODELS_DIR / "best_model.joblib"),
+                "feature_count": len(feature_names),
+                "best_model": best_name,
+            },
+            f,
+            indent=2,
+        )
 
     # Fairness check
     print("\nRunning fairness check …")

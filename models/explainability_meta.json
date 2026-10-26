@@ -1,0 +1,6 @@
+{
+  "data_sha256": "aec66f9df751ed2bcb6b03b39dec61d523a6eb39e925ffa666d179c3f72da2e5",
+  "model_sha256": "5e6511e77e6f29d20bcd1ceac0e1b7d349c69b995e0536cd253a9a4ddc779328",
+  "feature_count": 33,
+  "best_model": "Ridge"
+}
