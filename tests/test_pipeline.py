@@ -13,9 +13,11 @@ Run with:
     pytest tests/ -v
 """
 
+import json
 import pathlib
 import sys
 
+import joblib
 import numpy as np
 import pandas as pd
 import pytest
@@ -30,6 +32,8 @@ from src.preprocess import (
     EDUCATION_ORDER,
     JOB_LEVEL_ORDER,
     build_pipeline,
+    data_sha256,
+    file_sha256,
     get_feature_names,
     load_data,
     split_data,
@@ -184,6 +188,12 @@ class TestPipeline:
         X_out = pipe.transform(X_mod)
         assert not np.isnan(X_out).any()
 
+    def test_unknown_job_level_is_neutral_in_engineering(self, raw_df):
+        X = raw_df.drop(columns=["Salary_INR"]).head(1).copy()
+        X.loc[:, "Job_Level"] = "Unknown"
+        transformed = FeatureEngineer().transform(X)
+        assert transformed["Exp_x_JobLevel"].iloc[0] == 0
+
 
 # ── Ordinal encoding tests ─────────────────────────────────────────────────────
 
@@ -224,6 +234,63 @@ class TestOrdinalEncoding:
             )
         )
         assert np.all(np.diff(encoded[:, 1]) > 0)
+
+
+class TestInterpretation:
+    def test_shap_values_are_grouped_by_source_feature(self):
+        from src.interpretation import aggregate_shap_values
+
+        names = ["Company_Size_Startup", "Company_Size_Mid-size", "Age_minus_Exp"]
+        values = np.array([[0.2, -0.1, 0.05], [-0.1, 0.3, -0.05]])
+        grouped = aggregate_shap_values(values, names)
+        grouped = grouped.set_index("feature")
+        assert set(grouped.index) == {"Company_Size", "Age_minus_Exp"}
+        assert grouped.loc["Company_Size", "mean_shap"] == pytest.approx(0.15)
+        assert grouped.loc["Age_minus_Exp", "mean_abs_shap"] == pytest.approx(0.05)
+
+    def test_shap_feature_count_must_match_names(self):
+        from src.interpretation import aggregate_shap_values
+
+        with pytest.raises(ValueError, match="feature names"):
+            aggregate_shap_values(np.zeros((1, 2)), ["Age"])
+
+
+class TestArtifacts:
+    @pytest.mark.skipif(
+        not (ROOT / "models" / "best_model.joblib").exists(),
+        reason="Model artifacts are not available",
+    )
+    def test_model_metadata_and_feature_names_match(self, split):
+        _, X_test, _, _ = split
+        models_dir = ROOT / "models"
+        with open(models_dir / "training_meta.json") as f:
+            meta = json.load(f)
+        with open(models_dir / "best_model_metrics.json") as f:
+            metrics = json.load(f)
+        with open(models_dir / "feature_names.json") as f:
+            feature_names = json.load(f)
+
+        assert meta["data_sha256"] == data_sha256(DATA_PATH)
+        assert meta["model_sha256"] == file_sha256(models_dir / "best_model.joblib")
+        assert metrics["data_sha256"] == meta["data_sha256"]
+        assert metrics["model_sha256"] == meta["model_sha256"]
+        model = joblib.load(models_dir / "best_model.joblib")
+        transformed = model.named_steps["preprocess"].transform(X_test)
+        assert len(feature_names) == transformed.shape[1]
+
+    @pytest.mark.skipif(
+        not (ROOT / "models" / "best_model.joblib").exists(),
+        reason="Model artifacts are not available",
+    )
+    def test_counterfactual_explanation_has_readable_finite_impacts(self, raw_df):
+        from src.interpretation import counterfactual_impacts, typical_profile
+
+        model = joblib.load(ROOT / "models" / "best_model.joblib")
+        profile = raw_df.drop(columns=["Salary_INR"]).iloc[0].to_dict()
+        impacts = counterfactual_impacts(model, profile, typical_profile(raw_df))
+        assert len(impacts) == 12
+        assert impacts["impact_inr"].notna().all()
+        assert impacts["label"].notna().all()
 
 
 # ── Predict module tests (requires trained model) ─────────────────────────────

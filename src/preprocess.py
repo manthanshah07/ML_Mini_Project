@@ -10,7 +10,6 @@ import hashlib
 import pathlib
 from typing import Tuple
 
-import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import train_test_split
@@ -19,7 +18,6 @@ from sklearn.preprocessing import (
     OrdinalEncoder,
     OneHotEncoder,
     StandardScaler,
-    FunctionTransformer,
 )
 from sklearn.base import BaseEstimator, TransformerMixin
 
@@ -34,6 +32,28 @@ TEST_SIZE = 0.20
 # Ordered categories for ordinal features
 EDUCATION_ORDER = ["High School", "Bachelor's", "Master's", "PhD"]
 JOB_LEVEL_ORDER = ["Junior", "Mid", "Senior", "Lead", "Manager"]
+GENDER_VALUES = ["Male", "Female"]
+JOB_TITLE_VALUES = [
+    "Software Engineer", "Data Scientist", "Data Analyst", "DevOps Engineer",
+    "Product Manager", "Business Analyst", "UI/UX Designer", "HR Executive",
+    "Marketing Manager", "Sales Executive",
+]
+INDUSTRY_VALUES = ["IT", "Finance", "Healthcare", "EdTech", "E-commerce", "Manufacturing"]
+CITY_VALUES = ["Bangalore", "Delhi", "Chennai", "Hyderabad", "Pune", "Mumbai", "Remote"]
+COMPANY_SIZE_VALUES = ["Startup", "Mid-size", "Enterprise"]
+WORK_MODE_VALUES = ["On-site", "Hybrid", "Remote"]
+
+# Raw input schema
+INPUT_FEATURES = [
+    "Age", "Gender", "Education_Level", "Years_Experience", "Job_Title",
+    "Job_Level", "Industry", "City", "Company_Size", "Work_Mode",
+    "Certifications_Count", "Skills_Count",
+]
+CATEGORICAL_FEATURES = [
+    "Gender", "Education_Level", "Job_Title", "Job_Level", "Industry",
+    "City", "Company_Size", "Work_Mode",
+]
+INTEGER_FEATURES = ["Age", "Years_Experience", "Certifications_Count", "Skills_Count"]
 
 # Feature groups
 # Age is represented by Age_minus_Exp below. Keeping both Age and
@@ -51,6 +71,22 @@ OHE_FEATURES = [
 ]
 
 TARGET = "Salary_INR"
+CATEGORY_VALUES = {
+    "Gender": GENDER_VALUES,
+    "Education_Level": EDUCATION_ORDER,
+    "Job_Title": JOB_TITLE_VALUES,
+    "Job_Level": JOB_LEVEL_ORDER,
+    "Industry": INDUSTRY_VALUES,
+    "City": CITY_VALUES,
+    "Company_Size": COMPANY_SIZE_VALUES,
+    "Work_Mode": WORK_MODE_VALUES,
+}
+INTEGER_RANGES = {
+    "Age": (21, 57),
+    "Years_Experience": (0, 35),
+    "Certifications_Count": (0, 5),
+    "Skills_Count": (2, 14),
+}
 
 
 # ── Custom transformer: feature engineering ───────────────────────────────────
@@ -75,12 +111,12 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         X["Skills_per_Cert"] = X["Skills_Count"] / (X["Certifications_Count"] + 1)
         X["Exp_x_JobLevel"] = X["Years_Experience"] * X["Job_Level"].map(
             self._job_level_map
-        ).fillna(1)
+        ).fillna(0)
         return X
 
     def get_feature_names_out(self, input_features=None):
         if input_features is None:
-            input_features = NUMERIC_FEATURES + ORDINAL_FEATURES + OHE_FEATURES
+            input_features = INPUT_FEATURES
         return list(input_features) + ENGINEERED_FEATURES
 
 
@@ -160,13 +196,38 @@ def build_pipeline(scale_numeric: bool = False) -> Pipeline:
 # ── Data loading & splitting ──────────────────────────────────────────────────
 
 def load_data(path: pathlib.Path = DATA_PATH) -> pd.DataFrame:
-    """Load the raw salary CSV."""
+    """Load and validate the raw salary CSV."""
     df = pd.read_csv(path)
+    expected = set(INPUT_FEATURES + [TARGET])
+    missing = sorted(expected - set(df.columns))
+    extra = sorted(set(df.columns) - expected)
+    if missing or extra:
+        raise ValueError(f"Dataset columns do not match schema. Missing={missing}; extra={extra}")
+    if df.isna().any().any():
+        raise ValueError("Dataset contains missing values.")
+    if df.duplicated().any():
+        raise ValueError("Dataset contains duplicate rows.")
+    for feature, (lower, upper) in INTEGER_RANGES.items():
+        if not pd.api.types.is_numeric_dtype(df[feature]):
+            raise ValueError(f"Dataset feature {feature} must be numeric.")
+        if not df[feature].between(lower, upper).all():
+            raise ValueError(f"Dataset feature {feature} is outside [{lower}, {upper}].")
+    if not pd.api.types.is_numeric_dtype(df[TARGET]) or (df[TARGET] <= 0).any():
+        raise ValueError(f"Dataset target {TARGET} must contain positive numeric values.")
+    for feature, allowed in CATEGORY_VALUES.items():
+        unknown = sorted(set(df[feature].unique()) - set(allowed))
+        if unknown:
+            raise ValueError(f"Dataset feature {feature} contains unknown values: {unknown}")
     return df
 
 
 def data_sha256(path: pathlib.Path = DATA_PATH) -> str:
     """Return a stable hash for detecting stale model artifacts."""
+    return file_sha256(path)
+
+
+def file_sha256(path: pathlib.Path) -> str:
+    """Return a SHA-256 hash for a file."""
     digest = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):

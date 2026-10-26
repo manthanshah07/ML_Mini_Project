@@ -9,7 +9,6 @@ Run with:
 """
 
 import pathlib
-import warnings
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
@@ -18,8 +17,6 @@ import pandas as pd
 import seaborn as sns
 from scipy import stats
 from statsmodels.stats.outliers_influence import variance_inflation_factor
-
-warnings.filterwarnings("ignore")
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DATA_PATH = ROOT / "data" / "salary.csv"

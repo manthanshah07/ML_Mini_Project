@@ -21,40 +21,23 @@ import joblib
 import pandas as pd
 
 from src.preprocess import (
-    EDUCATION_ORDER,
-    JOB_LEVEL_ORDER,
+    CATEGORY_VALUES,
+    INTEGER_RANGES,
+    INPUT_FEATURES,
+    data_sha256,
+    file_sha256,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "models"
 
-REQUIRED_FEATURES = [
-    "Age", "Gender", "Education_Level", "Years_Experience", "Job_Title",
-    "Job_Level", "Industry", "City", "Company_Size", "Work_Mode",
-    "Certifications_Count", "Skills_Count",
-]
+REQUIRED_FEATURES = INPUT_FEATURES
 
 VALID_CATEGORIES = {
-    "Gender": {"Male", "Female"},
-    "Education_Level": set(EDUCATION_ORDER),
-    "Job_Title": {
-        "Software Engineer", "Data Scientist", "Data Analyst", "DevOps Engineer",
-        "Product Manager", "Business Analyst", "UI/UX Designer", "HR Executive",
-        "Marketing Manager", "Sales Executive",
-    },
-    "Job_Level": set(JOB_LEVEL_ORDER),
-    "Industry": {"IT", "Finance", "Healthcare", "EdTech", "E-commerce", "Manufacturing"},
-    "City": {"Bangalore", "Delhi", "Chennai", "Hyderabad", "Pune", "Mumbai", "Remote"},
-    "Company_Size": {"Startup", "Mid-size", "Enterprise"},
-    "Work_Mode": {"On-site", "Hybrid", "Remote"},
+    field: set(values) for field, values in CATEGORY_VALUES.items()
 }
 
-NUMERIC_RANGES = {
-    "Age": (21, 57),
-    "Years_Experience": (0, 35),
-    "Certifications_Count": (0, 5),
-    "Skills_Count": (2, 14),
-}
+NUMERIC_RANGES = INTEGER_RANGES
 
 # Cached objects (loaded once on first call)
 _estimator = None
@@ -75,6 +58,10 @@ def _load_model():
         _estimator = joblib.load(model_path)
         with open(meta_path) as f:
             _meta = json.load(f)
+        if _meta.get("data_sha256") and _meta["data_sha256"] != data_sha256():
+            raise RuntimeError("The dataset changed after this model was trained.")
+        if _meta.get("model_sha256") and _meta["model_sha256"] != file_sha256(model_path):
+            raise RuntimeError("The model artifact does not match its metadata.")
         feat_path = MODELS_DIR / "feature_names.json"
         if feat_path.exists():
             with open(feat_path) as f:
@@ -180,7 +167,11 @@ def get_test_mae() -> float:
         with open(metrics_path) as f:
             metrics = json.load(f)
         _, meta, _ = _load_model()
-        if metrics.get("best_model") == meta.get("best_model"):
+        if (
+            metrics.get("best_model") == meta.get("best_model")
+            and metrics.get("data_sha256") == meta.get("data_sha256")
+            and metrics.get("model_sha256") == meta.get("model_sha256")
+        ):
             test_mae = metrics.get("test_mae_inr")
             if test_mae is not None:
                 return float(test_mae)
@@ -197,7 +188,11 @@ def get_prediction_error_band() -> float:
         with open(metrics_path) as f:
             metrics = json.load(f)
         _, meta, _ = _load_model()
-        if metrics.get("best_model") == meta.get("best_model"):
+        if (
+            metrics.get("best_model") == meta.get("best_model")
+            and metrics.get("data_sha256") == meta.get("data_sha256")
+            and metrics.get("model_sha256") == meta.get("model_sha256")
+        ):
             band = metrics.get("error_band_inr")
             if band is not None:
                 return float(band)

@@ -18,13 +18,15 @@ Predict an employee's annual salary in INR from personal and professional attrib
 │   ├── train.py                # Model training + hyperparameter search
 │   ├── evaluate.py             # Metrics + visualisation
 │   ├── explain.py              # SHAP + permutation importance + fairness
+│   ├── interpretation.py       # Readable grouped and counterfactual explanations
 │   └── predict.py              # Inference helper (used by app & tests)
 ├── scripts/
 │   ├── eda.py                  # Standalone EDA script
 │   └── create_notebooks.py     # Generates .ipynb files programmatically
 ├── models/
 │   ├── best_model.joblib       # Saved best model pipeline
-│   ├── shap_explainer.joblib   # Saved SHAP LinearExplainer
+│   ├── shap_explainer.joblib   # Saved SHAP explainer
+│   ├── explainability_meta.json # Explainability compatibility metadata
 │   ├── training_meta.json      # CV scores, best params, test metrics
 │   ├── best_model_metrics.json # Test-set metrics
 │   └── feature_names.json      # Feature names for SHAP
@@ -32,12 +34,13 @@ Predict an employee's annual salary in INR from personal and professional attrib
 │   ├── figures/                # All plots (PNG, 150 dpi)
 │   ├── model_comparison.csv    # Complete model comparison table
 │   ├── permutation_importance.csv
+│   ├── shap_grouped_importance.csv
 │   ├── fairness_overall.csv
 │   └── fairness_controlled.csv
 ├── app/
 │   └── app.py                  # Streamlit web application
 ├── tests/
-│   └── test_pipeline.py        # pytest test suite (24 tests)
+│   └── test_pipeline.py        # pytest test suite
 ├── requirements.txt
 ├── .gitignore
 └── README.md
@@ -128,14 +131,14 @@ python -m src.evaluate
 
 ```bash
 python -m src.explain
-# SHAP plots + fairness report saved
+# Grouped SHAP plots, factor report, and fairness report saved
 ```
 
 ### 6. Run tests
 
 ```bash
 pytest tests/ -v
-# 24 tests — all pass
+# 31 tests — all pass
 ```
 
 ### 7. Launch web app
@@ -204,21 +207,27 @@ flowchart TD
 ## 🔍 Explainability Findings
 
 ### SHAP (Linear Explainer on Ridge)
-Top salary drivers by mean |SHAP| value:
-1. **Years_Experience / Age** — strongest drivers (collinear; Exp×JobLevel interaction captures combined effect)
-2. **Job_Level (ordinal)** — higher level = strongly positive SHAP
-3. **Education_Level (ordinal)** — PhD/Master's = positive push
-4. **Age_minus_Exp** — captures "career start age" effect
-5. **Company_Size_Enterprise** — positive SHAP vs Startup/Mid-size
+Top model drivers by grouped mean |SHAP| value:
+1. **Experience** — strongest driver (the transformed model feature is grouped for readability)
+2. **Job level** — higher level = strongly positive SHAP
+3. **Education** — PhD/Master's = positive push
+4. **Company size** — grouped across the encoded category columns
+5. **Location** — grouped across the encoded city columns
+
+The app’s user-facing chart uses one-feature-at-a-time comparisons against a
+typical training profile and reports the change in INR. This is a descriptive
+model comparison, not a causal salary effect. The technical SHAP view remains
+available in the app and is measured on the model-output scale (`log1p` salary
+for the selected linear model).
 
 ### Fairness Analysis (Male vs Female)
 
-| | Avg Predicted Salary | Avg |Residual| |
-|---|---|---|
-| Female (n=49) | ₹13.46 L | ₹1.33 L |
-| Male (n=51) | ₹11.23 L | ₹0.98 L |
+| Group | n | Avg predicted salary | Avg absolute error | 95% bootstrap CI for absolute error |
+|---|---:|---:|---:|---:|
+| Female | 49 | ₹13.45 L | ₹1.32 L | ₹0.96–₹1.74 L |
+| Male | 51 | ₹11.23 L | ₹0.97 L | ₹0.72–₹1.37 L |
 
-> **⚠ Important caveat:** The 2.2L gap in predicted salary reflects the underlying distribution in the dataset — females in the test set happened to be more concentrated in senior/high-experience roles. **This does not imply the model itself introduces gender bias.** With only 49–51 samples per group and no salary-equalised controls, any gap is driven primarily by confounders (job level, experience). No causal or fairness claim should be made from this analysis.
+> **⚠ Important caveat:** The 2.2L gap in predicted salary reflects the underlying distribution in the dataset — females in the test set happened to be more concentrated in senior/high-experience roles. **This does not imply the model itself introduces gender bias.** With only 49–51 samples per group and tiny controlled cells, the bootstrap intervals and error comparisons are descriptive only. No causal or definitive fairness claim should be made from this analysis.
 
 ---
 
@@ -235,7 +244,8 @@ Top salary drivers by mean |SHAP| value:
 | `residuals.png` | Residual scatter + histogram — approximately normal |
 | `learning_curve.png` | Train vs CV MAE vs training size |
 | `shap_summary.png` | SHAP beeswarm — top 20 features |
-| `shap_bar.png` | Mean |SHAP| bar chart |
+| `shap_bar.png` | Grouped mean |SHAP| bar chart |
+| `shap_grouped_importance.csv` | Grouped SHAP importance table |
 | `permutation_importance.png` | Model-agnostic permutation importance |
 
 ---
@@ -285,6 +295,6 @@ Top salary drivers by mean |SHAP| value:
 5. Company Size (Enterprise premium over Startups)
 
 **Limitations (one paragraph):**
-This model is trained on a small 500-row dataset that appears synthetic — correlations are unusually clean and feature distributions are overly rounded. As a result, the R² of 0.95 likely overstates real-world performance. The model captures base salary only and ignores bonus, equity, location cost-of-living, and market trends. The app's displayed range is a typical-error band based on test MAE, not a calibrated prediction interval. Gender fairness analysis shows a predicted gap, but this reflects confounding variables and small subgroup sizes rather than a causal or definitive model-bias finding. All results should be treated as educational demonstrations, not as salary benchmarks.
+This model is trained on a small 500-row dataset that appears synthetic — correlations are unusually clean and feature distributions are overly rounded. As a result, the R² of 0.95 likely overstates real-world performance. The model captures base salary only and ignores bonus, equity, location cost-of-living, and market trends. The app's displayed range is an empirical out-of-fold error band, not a calibrated prediction interval. The factor chart compares one field at a time with a typical training profile and is descriptive rather than causal. Gender fairness analysis shows a predicted gap, but this reflects confounding variables and small subgroup sizes rather than a causal or definitive model-bias finding. All results should be treated as educational demonstrations, not as salary benchmarks.
 
 ---

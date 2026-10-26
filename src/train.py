@@ -19,7 +19,6 @@ Run with:
 
 import json
 import pathlib
-import warnings
 from typing import Any, Dict, Tuple
 
 import joblib
@@ -38,12 +37,11 @@ from src.preprocess import (
     RANDOM_STATE,
     build_pipeline,
     data_sha256,
+    file_sha256,
     get_feature_names,
     load_data,
     split_data,
 )
-
-warnings.filterwarnings("ignore")
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "models"
@@ -271,6 +269,7 @@ def save_artifacts(
     model_path = MODELS_DIR / "best_model.joblib"
     joblib.dump(estimator, model_path)
     print(f"\n  ✓ Saved best model pipeline to {model_path}")
+    model_hash = file_sha256(model_path)
 
     feature_names_path = MODELS_DIR / "feature_names.json"
     with open(feature_names_path, "w") as f:
@@ -288,6 +287,7 @@ def save_artifacts(
     meta = {
         "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
         "data_sha256": data_sha256(DATA_PATH),
+        "model_sha256": model_hash,
         "error_band_inr": error_band_inr,
         "error_band_quantile": 0.90,
         "best_model": best_name,
@@ -316,6 +316,7 @@ def save_artifacts(
             {
                 "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
                 "data_sha256": data_sha256(DATA_PATH),
+                "model_sha256": model_hash,
                 "best_model": best_name,
                 "test_mae_inr": test_metrics.get("MAE"),
                 "test_rmse_inr": test_metrics.get("RMSE"),

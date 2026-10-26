@@ -5,7 +5,6 @@ Programmatically creates Jupyter notebooks from the eda.py and
 modeling pipeline scripts. Run after EDA and training are complete.
 """
 
-import json
 import pathlib
 import nbformat
 from nbformat.v4 import new_notebook, new_code_cell, new_markdown_cell
