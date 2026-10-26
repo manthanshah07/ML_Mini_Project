@@ -54,6 +54,22 @@ Given 12 employee attributes (demographics, education, role, company details), p
 
 ---
 
+## 🌍 Real-World Use Cases
+
+This tool serves several distinct audiences across hiring, career development, and education:
+
+| Persona | Real-World Scenario | What the app provides |
+|---|---|---|
+| 🎓 **Job Seeker / Fresher** | "Is my salary expectation realistic for my city and experience level?" | Enter your own profile → get an instant data-backed estimate with error band |
+| 👩‍💼 **HR / Hiring Manager** | "What is a competitive offer for a Senior DevOps Engineer in Mumbai?" | Tweak role, level, and city → compare predicted salaries directly |
+| 📚 **Career Counsellor** | "How much will a PhD vs. Master's improve a client's earning power?" | Swap the Education field → the factor chart shows the exact INR delta |
+| 📊 **Compensation Analyst** | "Do Enterprise companies pay more than Startups for the same role?" | Change Company Size → observe the predicted salary shift |
+| 🏫 **Student / Educator** | End-to-end ML project covering the full production pipeline | Raw data → EDA → 5-model comparison → SHAP explainability → live Streamlit app |
+
+The SHAP and counterfactual explanation features make the tool especially valuable for **career guidance and HR** audiences — they can see *why* a salary is estimated, not just *what* it is.
+
+---
+
 ## 📊 Dataset Description
 
 | Property | Value |
