@@ -182,22 +182,65 @@ def plot_factor_bar(factors: pd.DataFrame) -> plt.Figure:
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    :root { --ink: #1F2A2E; --muted: #64736D; --paper: #F7F5F0; --line: #D9DDD7; --teal: #356F68; }
+    /* ── Light palette (default) ─────────────────────────────────────────── */
+    :root {
+        --ink:         #1F2A2E;
+        --muted:       #64736D;
+        --paper:       #F7F5F0;
+        --line:        #D9DDD7;
+        --teal:        #356F68;
+        --surface:     rgba(255,255,255,.42);
+        --metric-bg:   #FFFFFF;
+        --header-bg:   transparent;
+        --card-bg:     #FFFFFF;
+        --card-border: #D9DDD7;
+    }
+    /* ── Dark mode overrides (Streamlit dark theme attribute) ────────────── */
+    [data-theme="dark"] {
+        --ink:         #E8F0ED;
+        --muted:       #A8B8B2;
+        --paper:       #0E1A17;
+        --line:        #2E3D38;
+        --surface:     rgba(255,255,255,.06);
+        --metric-bg:   #1E2D2A;
+        --header-bg:   #0E1A17;
+        --card-bg:     #1A2A26;
+        --card-border: #2E3D38;
+    }
+    /* ── Dark mode fallback (OS-level preference) ────────────────────────── */
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --ink:         #E8F0ED;
+            --muted:       #A8B8B2;
+            --paper:       #0E1A17;
+            --line:        #2E3D38;
+            --surface:     rgba(255,255,255,.06);
+            --metric-bg:   #1E2D2A;
+            --header-bg:   #0E1A17;
+            --card-bg:     #1A2A26;
+            --card-border: #2E3D38;
+        }
+    }
     .stApp { background: var(--paper); color: var(--ink); }
-    [data-testid="stHeader"] { background: transparent; }
+    [data-testid="stHeader"] { background: var(--header-bg); }
     .block-container { max-width: 1180px; padding-top: 3rem; padding-bottom: 4rem; }
     .eyebrow { color: var(--teal); font-size: .75rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
     .intro { border-bottom: 1px solid var(--line); padding-bottom: 1.5rem; margin-bottom: 2rem; }
     .intro h1 { color: var(--ink); font-size: 2.8rem; letter-spacing: -.04em; margin: .35rem 0 .5rem; }
     .intro p { color: var(--muted); font-size: 1rem; max-width: 42rem; margin: 0; }
     .section-note { color: var(--muted); font-size: .88rem; margin-top: -.5rem; }
-    div[data-testid="stForm"] { border: 1px solid var(--line); border-radius: 14px; padding: 1.35rem 1.5rem; background: rgba(255,255,255,.42); }
-    [data-testid="stMetric"] { background: #FFFFFF; border: 1px solid var(--line); border-radius: 12px; padding: 1rem; }
+    div[data-testid="stForm"] { border: 1px solid var(--line); border-radius: 14px; padding: 1.35rem 1.5rem; background: var(--surface); }
+    [data-testid="stMetric"] { background: var(--metric-bg); border: 1px solid var(--line); border-radius: 12px; padding: 1rem; }
     [data-testid="stMetricLabel"] { color: var(--muted); }
     [data-testid="stMetricValue"] { color: var(--teal); }
     .fine-print { color: var(--muted); font-size: .8rem; line-height: 1.5; }
     .stButton > button { background: var(--teal); border: 0; border-radius: 8px; color: white; font-weight: 600; }
     .stButton > button:hover { background: #285B55; color: white; }
+    /* ── Use-case cards ──────────────────────────────────────────────────── */
+    .use-case-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 1rem 1.1rem; height: 100%; }
+    .use-case-card .card-icon { font-size: 1.4rem; margin-bottom: .35rem; }
+    .use-case-card .card-title { color: var(--teal); font-weight: 700; font-size: .9rem; margin-bottom: .3rem; }
+    .use-case-card .card-body { color: var(--muted); font-size: .82rem; line-height: 1.45; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -259,6 +302,73 @@ with st.expander("About this model"):
         st.markdown("**Training data:** 500 synthetic employee profiles")
         st.markdown("**Target:** base annual salary in INR")
         st.markdown("The model excludes bonuses, equity, and market changes.")
+
+# ── Real-World Use Cases ───────────────────────────────────────────────────────
+st.subheader("📌 Real-World Use Cases")
+st.markdown(
+    "<div class='section-note'>Who this tool is built for — and how they would use it.</div>",
+    unsafe_allow_html=True,
+)
+
+_USE_CASES = [
+    (
+        "🎓",
+        "Job Seeker / Fresher",
+        "Enter your own profile to check whether your salary expectation is "
+        "realistic for your city, experience, and education level.",
+    ),
+    (
+        "👩‍💼",
+        "HR / Hiring Manager",
+        "Estimate a competitive offer for any role, level, and location — "
+        "data-backed and adjusted for company size.",
+    ),
+    (
+        "📚",
+        "Career Counsellor",
+        "Swap education or job level to show clients the exact INR impact "
+        "of a higher degree or a promotion.",
+    ),
+    (
+        "📊",
+        "Compensation Analyst",
+        "Compare salary estimates across industries, company sizes, and "
+        "cities for the same role — side by side.",
+    ),
+    (
+        "🏫",
+        "Student / Educator",
+        "A live end-to-end ML demo: raw data → 5 models → SHAP "
+        "explainability → deployed web app.",
+    ),
+]
+
+_uc_row1 = st.columns(3, gap="medium")
+_uc_row2 = st.columns(2, gap="medium")
+
+for _col, (_icon, _title, _body) in zip(_uc_row1, _USE_CASES[:3]):
+    with _col:
+        st.markdown(
+            f"""<div class="use-case-card">
+                <div class="card-icon">{_icon}</div>
+                <div class="card-title">{_title}</div>
+                <div class="card-body">{_body}</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+for _col, (_icon, _title, _body) in zip(_uc_row2, _USE_CASES[3:]):
+    with _col:
+        st.markdown(
+            f"""<div class="use-case-card">
+                <div class="card-icon">{_icon}</div>
+                <div class="card-title">{_title}</div>
+                <div class="card-body">{_body}</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+st.markdown("<div style='margin-bottom:1.5rem'></div>", unsafe_allow_html=True)
 
 st.subheader("Build a profile")
 st.markdown("<div class='section-note'>All fields are used by the trained model.</div>", unsafe_allow_html=True)
