@@ -1,6 +1,6 @@
 # Salary Prediction using Machine Learning
 
-Predict an employee's annual salary in INR from personal and professional attributes. Compares five regression models, explains predictions with SHAP, and serves results via a Streamlit web app.
+Predictt an employee's annual salary in INR from personal and professional attributes. Compares five regression models, explains predictions with SHAP, and serves results via a Streamlit web app.
 
 ---
 
