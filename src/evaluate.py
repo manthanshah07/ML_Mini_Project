@@ -11,7 +11,7 @@ Metrics reported:
   - CV MAE mean ± std (INR, 5-fold, from training)
 
 Plots produced:
-  - model_comparison_bar.png   — bar chart of CV MAE & test MAE per model
+- model_comparison_bar.png   — bar chart of CV MAE per model
   - actual_vs_predicted.png    — scatter of y_true vs y_pred for best model
   - residuals.png              — residual plot for best model
   - learning_curve.png         — train vs CV score vs training size
@@ -36,6 +36,7 @@ from sklearn.model_selection import learning_curve
 from src.preprocess import (
     DATA_PATH,
     RANDOM_STATE,
+    data_sha256,
     load_data,
     split_data,
 )
@@ -269,12 +270,25 @@ def plot_learning_curve(
 def main() -> None:
     print("Loading data and saved artifacts …")
     df = load_data(DATA_PATH)
-    X_train, X_test, y_train, y_test = split_data(df)
 
     # Load metadata
     meta_path = MODELS_DIR / "training_meta.json"
     with open(meta_path) as f:
         meta = json.load(f)
+
+    expected_hash = meta.get("data_sha256")
+    if expected_hash and expected_hash != data_sha256(DATA_PATH):
+        raise RuntimeError(
+            "The dataset has changed since training. Retrain before evaluating."
+        )
+
+    split_path = MODELS_DIR / "test_split.joblib"
+    if split_path.exists():
+        X_test, y_test = joblib.load(split_path)
+        X_train = df.drop(columns=["Salary_INR"]).drop(index=X_test.index)
+        y_train = df.loc[X_train.index, "Salary_INR"]
+    else:
+        X_train, X_test, y_train, y_test = split_data(df)
 
     best_name: str = meta["best_model"]
     print(f"Best model: {best_name}")
@@ -317,6 +331,10 @@ def main() -> None:
     with open(results_path, "w") as f:
         json.dump(
             {
+                "artifact_schema_version": meta.get("artifact_schema_version", 1),
+                "data_sha256": meta.get("data_sha256"),
+                "error_band_inr": meta.get("error_band_inr"),
+                "error_band_quantile": meta.get("error_band_quantile"),
                 "best_model": best_name,
                 "test_mae_inr": metrics["MAE"],
                 "test_rmse_inr": metrics["RMSE"],

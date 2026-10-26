@@ -6,18 +6,24 @@ Inference helper for the trained salary prediction model.
 Provides:
   - predict_salary(input_dict) → predicted salary in INR
   - format_inr_lakhs(amount)   → Indian lakh-formatted string
-  - validate_profile(input_dict) → list of warnings / validation messages
+  - validate_profile(input_dict) → list of validation errors
 
 Used by the Streamlit app and by tests.
 """
 
 import json
+import math
+import numbers
 import pathlib
 from typing import Any, Dict, List, Tuple
 
 import joblib
-import numpy as np
 import pandas as pd
+
+from src.preprocess import (
+    EDUCATION_ORDER,
+    JOB_LEVEL_ORDER,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "models"
@@ -27,6 +33,28 @@ REQUIRED_FEATURES = [
     "Job_Level", "Industry", "City", "Company_Size", "Work_Mode",
     "Certifications_Count", "Skills_Count",
 ]
+
+VALID_CATEGORIES = {
+    "Gender": {"Male", "Female"},
+    "Education_Level": set(EDUCATION_ORDER),
+    "Job_Title": {
+        "Software Engineer", "Data Scientist", "Data Analyst", "DevOps Engineer",
+        "Product Manager", "Business Analyst", "UI/UX Designer", "HR Executive",
+        "Marketing Manager", "Sales Executive",
+    },
+    "Job_Level": set(JOB_LEVEL_ORDER),
+    "Industry": {"IT", "Finance", "Healthcare", "EdTech", "E-commerce", "Manufacturing"},
+    "City": {"Bangalore", "Delhi", "Chennai", "Hyderabad", "Pune", "Mumbai", "Remote"},
+    "Company_Size": {"Startup", "Mid-size", "Enterprise"},
+    "Work_Mode": {"On-site", "Hybrid", "Remote"},
+}
+
+NUMERIC_RANGES = {
+    "Age": (21, 57),
+    "Years_Experience": (0, 35),
+    "Certifications_Count": (0, 5),
+    "Skills_Count": (2, 14),
+}
 
 # Cached objects (loaded once on first call)
 _estimator = None
@@ -38,8 +66,14 @@ def _load_model():
     """Lazy-load the saved model and metadata."""
     global _estimator, _meta, _feature_names
     if _estimator is None:
-        _estimator = joblib.load(MODELS_DIR / "best_model.joblib")
-        with open(MODELS_DIR / "training_meta.json") as f:
+        model_path = MODELS_DIR / "best_model.joblib"
+        meta_path = MODELS_DIR / "training_meta.json"
+        if not model_path.exists() or not meta_path.exists():
+            raise FileNotFoundError(
+                "Model artifacts are missing. Run `python -m src.train` first."
+            )
+        _estimator = joblib.load(model_path)
+        with open(meta_path) as f:
             _meta = json.load(f)
         feat_path = MODELS_DIR / "feature_names.json"
         if feat_path.exists():
@@ -50,20 +84,46 @@ def _load_model():
 
 def validate_profile(input_dict: Dict[str, Any]) -> List[str]:
     """
-    Validates employee profile values and returns a list of warning messages.
+    Validate employee profile values and return human-readable errors.
+
+    The function remains list-based for the Streamlit UI, but callers should
+    treat a non-empty result as invalid input rather than merely a warning.
     """
-    warnings_list = []
+    errors = []
     missing = [k for k in REQUIRED_FEATURES if k not in input_dict]
     if missing:
-        warnings_list.append(f"Missing required fields: {', '.join(missing)}")
+        errors.append(f"Missing required fields: {', '.join(missing)}")
+        return errors
+
+    for field, allowed in VALID_CATEGORIES.items():
+        value = input_dict[field]
+        if not isinstance(value, str) or value not in allowed:
+            errors.append(
+                f"Invalid {field}: {value!r}. Expected one of: {', '.join(sorted(allowed))}."
+            )
+
+    for field, (lower, upper) in NUMERIC_RANGES.items():
+        value = input_dict[field]
+        if isinstance(value, bool) or not isinstance(value, numbers.Real):
+            errors.append(f"{field} must be a number between {lower} and {upper}.")
+            continue
+        if not math.isfinite(float(value)) or int(value) != value:
+            errors.append(f"{field} must be a finite whole number between {lower} and {upper}.")
+            continue
+        if not lower <= value <= upper:
+            errors.append(f"{field} must be between {lower} and {upper}; received {value}.")
 
     age = input_dict.get("Age", 0)
     exp = input_dict.get("Years_Experience", 0)
-    if exp > age - 18:
-        warnings_list.append(
+    if (
+        isinstance(age, numbers.Real)
+        and isinstance(exp, numbers.Real)
+        and exp > age - 18
+    ):
+        errors.append(
             f"Unusual profile: Years of experience ({exp}) exceeds career span for age {age} (Age − 18 = {age - 18})."
         )
-    return warnings_list
+    return errors
 
 
 def predict_salary(input_dict: Dict[str, Any]) -> float:
@@ -71,6 +131,10 @@ def predict_salary(input_dict: Dict[str, Any]) -> float:
     Predict annual salary in INR for a single employee profile.
     Automatically handles pipeline preprocessing and inverse transformation.
     """
+    errors = validate_profile(input_dict)
+    if errors:
+        raise ValueError("Invalid profile: " + " ".join(errors))
+
     estimator, _, _ = _load_model()
     input_df = pd.DataFrame([input_dict])
     raw_pred = estimator.predict(input_df)
@@ -80,15 +144,20 @@ def predict_salary(input_dict: Dict[str, Any]) -> float:
 def predict_with_interval(
     input_dict: Dict[str, Any],
     mae: float = None,
+    *,
+    error_band: float = None,
 ) -> Tuple[float, float, float]:
+    """Return a prediction and an empirical typical-error band.
+
+    The default band is the out-of-fold 90th percentile of absolute errors
+    saved during training. It is empirical and should not be interpreted as a
+    guaranteed confidence interval.
     """
-    Returns (predicted_salary, lower_bound, upper_bound) based on test MAE.
-    """
-    if mae is None:
-        mae = get_test_mae()
+    if error_band is None:
+        error_band = mae if mae is not None else get_prediction_error_band()
     pred = predict_salary(input_dict)
-    lower = max(0, pred - mae)
-    upper = pred + mae
+    lower = max(0, pred - error_band)
+    upper = pred + error_band
     return pred, lower, upper
 
 
@@ -109,11 +178,32 @@ def get_test_mae() -> float:
     metrics_path = MODELS_DIR / "best_model_metrics.json"
     if metrics_path.exists():
         with open(metrics_path) as f:
-            return json.load(f).get("test_mae_inr", 115000.0)
+            metrics = json.load(f)
+        _, meta, _ = _load_model()
+        if metrics.get("best_model") == meta.get("best_model"):
+            test_mae = metrics.get("test_mae_inr")
+            if test_mae is not None:
+                return float(test_mae)
     # Fallback to CV MAE
     _, meta, _ = _load_model()
     best = meta["best_model"]
     return meta["cv_scores"][best]["cv_mae_inr"]
+
+
+def get_prediction_error_band() -> float:
+    """Return the empirical error band generated during training."""
+    metrics_path = MODELS_DIR / "best_model_metrics.json"
+    if metrics_path.exists():
+        with open(metrics_path) as f:
+            metrics = json.load(f)
+        _, meta, _ = _load_model()
+        if metrics.get("best_model") == meta.get("best_model"):
+            band = metrics.get("error_band_inr")
+            if band is not None:
+                return float(band)
+    # Compatibility fallback for artifacts generated before error-band
+    # calibration was added. This remains an error scale, not an interval.
+    return get_test_mae()
 
 
 if __name__ == "__main__":
@@ -131,8 +221,8 @@ if __name__ == "__main__":
         "Certifications_Count": 2,
         "Skills_Count": 8,
     }
-    mae = get_test_mae()
-    pred, lo, hi = predict_with_interval(sample, mae)
+    error_band = get_prediction_error_band()
+    pred, lo, hi = predict_with_interval(sample, error_band)
     print(f"Predicted salary : {format_inr_lakhs(pred)}")
-    print(f"Approx. range    : {format_inr_lakhs(lo)} – {format_inr_lakhs(hi)}")
-    print(f"(Based on test MAE of {format_inr_lakhs(mae)})")
+    print(f"Typical error band: {format_inr_lakhs(lo)} – {format_inr_lakhs(hi)}")
+    print(f"(Based on an empirical error band of {format_inr_lakhs(error_band)})")

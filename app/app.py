@@ -34,10 +34,11 @@ sys.path.insert(0, str(ROOT))
 
 from src.predict import (
     format_inr_lakhs,
-    predict_salary,
+    get_prediction_error_band,
     predict_with_interval,
     validate_profile,
 )
+from src.preprocess import DATA_PATH, data_sha256
 
 MODELS_DIR = ROOT / "models"
 REPORTS_DIR = ROOT / "reports"
@@ -89,7 +90,8 @@ def load_shap_explainer():
     if expl_path.exists():
         try:
             return joblib.load(expl_path)
-        except Exception:
+        except Exception as exc:
+            st.warning(f"SHAP explainer could not be loaded: {exc}")
             return None
     return None
 
@@ -108,17 +110,22 @@ def get_shap_values_for_input(estimator, explainer, input_dict: dict, feature_na
         sv = explainer(X_transformed, check_additivity=False)
         vals = sv.values[0] if hasattr(sv, "values") else sv[0]
         return vals, feature_names
-    except Exception:
+    except (TypeError, AttributeError, ValueError):
         try:
             vals = explainer.shap_values(X_transformed)
             if isinstance(vals, list):
                 vals = vals[0]
             return vals[0], feature_names
-        except Exception:
+        except Exception as exc:
+            st.warning(f"SHAP values could not be computed: {exc}")
             return None, None
 
 
-def plot_shap_bar(shap_vals: np.ndarray, feature_names: list, pred_salary: float) -> plt.Figure:
+def plot_shap_bar(
+    shap_vals: np.ndarray,
+    feature_names: list,
+    target_label: str,
+) -> plt.Figure:
     """Top-10 SHAP feature bar chart with most important driver placed at the top."""
     n = min(10, len(shap_vals))
     abs_vals = np.abs(shap_vals)
@@ -143,7 +150,7 @@ def plot_shap_bar(shap_vals: np.ndarray, feature_names: list, pred_salary: float
     ax.set_yticks(range(n))
     ax.set_yticklabels(top_names, fontsize=10, color="white")
     ax.invert_yaxis()  # Place the #1 driver at the top
-    ax.set_xlabel("SHAP value (Impact on log-salary)", fontsize=9, color="#AAAAAA")
+    ax.set_xlabel(f"SHAP value (Impact on {target_label})", fontsize=9, color="#AAAAAA")
     ax.set_title("Top Factors Influencing This Prediction", fontsize=11, color="white", pad=10)
     ax.tick_params(colors="white")
     ax.spines["top"].set_visible(False)
@@ -250,17 +257,36 @@ st.markdown("""
 
 
 # ── Load artifacts ─────────────────────────────────────────────────────────────
-estimator = load_model()
-meta = load_meta()
-metrics = load_metrics()
-feature_names = load_feature_names()
-explainer = load_shap_explainer()
+try:
+    estimator = load_model()
+    meta = load_meta()
+    metrics = load_metrics()
+    feature_names = load_feature_names()
+    explainer = load_shap_explainer()
+except Exception as exc:
+    st.error(
+        "The model artifacts could not be loaded. Run the training and evaluation "
+        f"steps first. Details: {exc}"
+    )
+    st.stop()
 
 best_model_name = meta.get("best_model", "Ridge")
+if meta.get("data_sha256") and meta["data_sha256"] != data_sha256(DATA_PATH):
+    st.error("The dataset changed after this model was trained. Retrain the model before use.")
+    st.stop()
+if metrics.get("best_model") != best_model_name:
+    metrics = {}
 best_cv_info = meta.get("cv_scores", {}).get(best_model_name, {})
-test_mae = metrics.get("test_mae_inr", best_cv_info.get("test_mae_inr", 115000.0))
+test_mae = metrics.get("test_mae_inr", best_cv_info.get("test_mae_inr"))
+error_band = metrics.get("error_band_inr")
 test_r2 = metrics.get("test_r2", best_cv_info.get("test_r2", None))
 test_rmse = metrics.get("test_rmse_inr", best_cv_info.get("test_rmse_inr", None))
+if test_mae is None:
+    st.error("No matching error metric is available for the loaded model.")
+    st.stop()
+if error_band is None:
+    error_band = get_prediction_error_band()
+shap_target_label = "log-salary" if meta.get("log_target") else "salary"
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -277,9 +303,9 @@ st.markdown("""
 with st.sidebar:
     st.markdown("### 🤖 Model Info")
     st.markdown(f"**Best model:** `{best_model_name}`")
-    if test_r2:
+    if test_r2 is not None:
         st.markdown(f"**Test R²:** `{test_r2:.4f}`")
-    if test_rmse:
+    if test_rmse is not None:
         st.markdown(f"**Test RMSE:** `{format_inr_lakhs(test_rmse)}`")
     st.markdown(f"**Test MAE:** `{format_inr_lakhs(test_mae)}`")
     st.divider()
@@ -318,7 +344,7 @@ with col3:
     company_size = st.selectbox("Company Size", COMPANY_SIZES, index=1)
     work_mode = st.selectbox("Work Mode", WORK_MODES, index=1)
     certs = st.slider("Certifications Count", 0, 5, 2, 1)
-    skills = st.slider("Skills Count", 1, 14, 8, 1)
+    skills = st.slider("Skills Count", 2, 14, 8, 1)
 
 
 # ── Predict button ─────────────────────────────────────────────────────────────
@@ -344,12 +370,14 @@ if predict_btn:
     }
 
     # Profile validation
-    warnings_list = validate_profile(input_dict)
-    for w in warnings_list:
-        st.warning(f"⚠️ {w}")
+    validation_errors = validate_profile(input_dict)
+    if validation_errors:
+        for error in validation_errors:
+            st.error(f"⚠️ {error}")
+        st.stop()
 
     with st.spinner("Predicting …"):
-        pred, lower, upper = predict_with_interval(input_dict, test_mae)
+        pred, lower, upper = predict_with_interval(input_dict, error_band)
         shap_vals, feat_names = get_shap_values_for_input(
             estimator, explainer, input_dict, feature_names
         )
@@ -363,19 +391,19 @@ if predict_btn:
             <div class="section-label">Predicted Annual Salary</div>
             <div class="salary-number">{format_inr_lakhs(pred)}</div>
             <div class="salary-range">
-                Approx. range: {format_inr_lakhs(lower)} – {format_inr_lakhs(upper)}
+                Empirical error band: {format_inr_lakhs(lower)} – {format_inr_lakhs(upper)}
             </div>
             <div class="metric-row">
                 <div class="metric-pill">₹ {pred:,.0f} / year</div>
-                <div class="metric-pill">± {format_inr_lakhs(test_mae)} (1× MAE)</div>
+                <div class="metric-pill">± {format_inr_lakhs(error_band)} (typical error)</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="disclaimer">
-            💡 Range is based on the model's test MAE. This estimate reflects base compensation
-            patterns in the training data.
+            💡 Range is an empirical error band, not a guaranteed prediction interval. This
+            estimate reflects base compensation patterns in the training data.
         </div>
         """, unsafe_allow_html=True)
 
@@ -390,11 +418,12 @@ if predict_btn:
     with exp_col:
         st.markdown("### 🔍 What Drives This Prediction?")
         if shap_vals is not None and feat_names:
-            fig = plot_shap_bar(shap_vals, feat_names, pred)
+            fig = plot_shap_bar(shap_vals, feat_names, shap_target_label)
             st.pyplot(fig)
             plt.close(fig)
             st.caption(
-                "Red bars push the salary **higher**; blue bars push it **lower**. "
+                f"Red bars push the {shap_target_label} output **higher**; "
+                "blue bars push it **lower**. "
                 "The most influential factor is at the top."
             )
         else:

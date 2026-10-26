@@ -1,44 +1,48 @@
 {
-  "best_model": "Lasso",
+  "artifact_schema_version": 2,
+  "data_sha256": "aec66f9df751ed2bcb6b03b39dec61d523a6eb39e925ffa666d179c3f72da2e5",
+  "error_band_inr": 217540.10338775418,
+  "error_band_quantile": 0.9,
+  "best_model": "Ridge",
   "best_params": {
-    "model__regressor__alpha": 0.001
+    "model__regressor__alpha": 1.0
   },
   "log_target": true,
   "cv_scores": {
     "Ridge": {
-      "cv_mae_inr": 101876.94361165813,
-      "cv_std_inr": 7056.921620802316,
-      "test_mae_inr": 115147.70305182632,
-      "test_rmse_inr": 174218.02117183176,
-      "test_r2": 0.9425060270653616
+      "cv_mae_inr": 101889.37848038554,
+      "cv_std_inr": 6341.076668437784,
+      "test_mae_inr": 114240.76882625044,
+      "test_rmse_inr": 173549.58190404956,
+      "test_r2": 0.9429463661587613
     },
     "Lasso": {
-      "cv_mae_inr": 101640.2925753766,
-      "cv_std_inr": 6877.406333872666,
-      "test_mae_inr": 110795.05134006988,
-      "test_rmse_inr": 166457.5141841519,
-      "test_r2": 0.9475140603705591
+      "cv_mae_inr": 101949.5255189023,
+      "cv_std_inr": 7165.371162471012,
+      "test_mae_inr": 114773.27880984903,
+      "test_rmse_inr": 173207.8798210894,
+      "test_r2": 0.9431708109900302
     },
     "RandomForest": {
-      "cv_mae_inr": 196794.61270047323,
-      "cv_std_inr": 27695.99071826992,
-      "test_mae_inr": 154089.66514588046,
-      "test_rmse_inr": 215982.52509235457,
-      "test_r2": 0.9116364011008865
+      "cv_mae_inr": 215936.48125,
+      "cv_std_inr": 29087.15243557524,
+      "test_mae_inr": 172561.525,
+      "test_rmse_inr": 235924.76315064405,
+      "test_r2": 0.894565383546509
     },
     "XGBoost": {
-      "cv_mae_inr": 138510.2640625,
-      "cv_std_inr": 14902.660115062945,
-      "test_mae_inr": 110151.71875,
-      "test_rmse_inr": 162200.37701559142,
-      "test_r2": 0.9501643776893616
+      "cv_mae_inr": 149146.1890625,
+      "cv_std_inr": 15889.553459722367,
+      "test_mae_inr": 123419.9921875,
+      "test_rmse_inr": 172969.4517306452,
+      "test_r2": 0.9433271884918213
     },
     "GradientBoosting": {
-      "cv_mae_inr": 133422.61956788474,
-      "cv_std_inr": 13409.069407854753,
-      "test_mae_inr": 105426.4457778457,
-      "test_rmse_inr": 142562.75957373242,
-      "test_r2": 0.9615010970844695
+      "cv_mae_inr": 135031.33911503237,
+      "cv_std_inr": 13747.60427198025,
+      "test_mae_inr": 114608.09690363049,
+      "test_rmse_inr": 152161.10507893068,
+      "test_r2": 0.956142540151473
     }
   }
 }
