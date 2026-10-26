@@ -231,7 +231,7 @@ def main() -> None:
         "6. Enterprise companies pay more on average than Startups; Mid-size is in between.",
         f"7. Age and Years_Experience are strongly correlated (r={r:.2f}), indicating potential "
         "multicollinearity; tree models handle this naturally, but linear models benefit from "
-        "using Age_minus_Exp as a decorrelated feature.",
+        "using Age_minus_Exp instead of raw Age in the linear pipeline.",
         f"8. IQR outlier check identified {len(outliers)} extreme salaries — retained to preserve "
         "representativeness on the small (500-row) dataset.",
     ]

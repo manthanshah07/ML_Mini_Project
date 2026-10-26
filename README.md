@@ -77,7 +77,7 @@ Given 12 employee attributes (demographics, education, role, company details), p
 5. **PhD and Master's** holders earn noticeably more than Bachelor's/High School grads.
 6. **Enterprise companies** pay more on average than Startups.
 7. **16 IQR outliers** (salary > ₹28.9L) were identified but **retained** — they represent plausible senior/lead salaries in IT/finance, and removing them from a 500-row dataset would hurt model representativeness.
-8. `Age_minus_Exp` (a decorrelated engineered feature) helps linear models avoid the Age–YearsExp collinearity trap.
+8. The linear pipeline uses `Age_minus_Exp` instead of raw `Age`, avoiding an exact dependency between raw age and experience while retaining career-start information.
 
 ---
 
@@ -93,8 +93,11 @@ cd <repo_directory>
 python3 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 
-# Install dependencies
+# Install runtime dependencies
 pip install -r requirements.txt
+
+# Install development and notebook dependencies (for tests/notebooks)
+pip install -r requirements-dev.txt
 
 # macOS only (required for XGBoost)
 brew install libomp
@@ -147,6 +150,12 @@ streamlit run app/app.py
 python -m src.predict
 ```
 
+Training, evaluation, and explainability should be run in this order. Training
+rewrites the model, metrics, and feature-name artifacts and removes any stale
+SHAP explainer; `src.explain` then generates a new explainer for that model.
+The app rejects mismatched or missing core artifacts rather than silently
+combining outputs from different training runs.
+
 ---
 
 ## 🏗️ Methodology
@@ -177,18 +186,18 @@ flowchart TD
 
 | Model | CV MAE (mean) | CV MAE (std) | Test MAE | Test RMSE | Test R² |
 |---|---|---|---|---|---|
-| **Lasso** ⭐ | **₹1.02 L** | **₹0.07 L** | **₹1.11 L** | **₹1.66 L** | **0.9475** |
-| Ridge | ₹1.02 L | ₹0.07 L | ₹1.15 L | ₹1.74 L | 0.9425 |
-| GradientBoosting | ₹1.33 L | ₹0.13 L | ₹1.05 L | ₹1.43 L | 0.9615 |
-| XGBoost | ₹1.39 L | ₹0.15 L | ₹1.10 L | ₹1.62 L | 0.9502 |
-| RandomForest | ₹1.97 L | ₹0.28 L | ₹1.54 L | ₹2.16 L | 0.9116 |
+| **Ridge** ⭐ | **₹1.02 L** | **₹0.06 L** | **₹1.14 L** | **₹1.74 L** | **0.9429** |
+| Lasso | ₹1.02 L | ₹0.07 L | ₹1.15 L | ₹1.73 L | 0.9432 |
+| GradientBoosting | ₹1.35 L | ₹0.14 L | ₹1.15 L | ₹1.52 L | 0.9561 |
+| XGBoost | ₹1.49 L | ₹0.16 L | ₹1.23 L | ₹1.73 L | 0.9433 |
+| RandomForest | ₹2.16 L | ₹0.29 L | ₹1.73 L | ₹2.36 L | 0.8946 |
 
-**Best model: Lasso Regression with log1p(Salary) target**
-- `alpha = 0.001`
+**Best model: Ridge Regression with log1p(Salary) target**
+- `alpha = 1.0`
 - `scale_numeric = True` (StandardScaler applied)
 - Wrapped via `TransformedTargetRegressor(func=np.log1p, inverse_func=np.expm1)`
 
-> Ridge outperforms tree models here because the dataset is small (400 training rows) and the relationship between experience/level and salary is approximately log-linear.
+> Ridge is selected by cross-validation. The difference from Lasso is small, so the ranking should be treated as uncertain on this 500-row dataset.
 
 ---
 
@@ -263,19 +272,19 @@ Top salary drivers by mean |SHAP| value:
 
 | Metric | Value |
 |---|---|
-| Test MAE | ₹1.15 L (₹1,15,057) |
-| Test RMSE | ₹1.74 L (₹1,73,892) |
-| Test R² | 0.9427 |
-| 5-Fold CV MAE | ₹1.02 L ± ₹0.15 L |
+| Test MAE | ₹1.14 L (₹1,14,241) |
+| Test RMSE | ₹1.74 L (₹1,73,550) |
+| Test R² | 0.9429 |
+| 5-Fold CV MAE | ₹1.02 L ± ₹0.06 L |
 
 **Top 5 Salary Drivers** (from SHAP analysis):
-1. Years of Experience / Age (collinear pair, r=0.995)
+1. Years of Experience / career-start age (`Age − Years_Experience`)
 2. Job Level (Junior → Manager: 2–3× salary increase)
 3. Education Level (PhD/Master's > Bachelor's > High School)
 4. Experience × Job Level interaction
 5. Company Size (Enterprise premium over Startups)
 
 **Limitations (one paragraph):**
-This model is trained on a small 500-row dataset that appears synthetic — correlations are unusually clean and feature distributions are overly rounded. As a result, the R² of 0.94 likely overstates real-world performance. The model captures base salary only and ignores bonus, equity, location cost-of-living, and market trends. Gender fairness analysis shows a 2.2L predicted gap, but this reflects confounding variables (experience, job level) in the test sample rather than model-introduced bias. All results should be treated as educational demonstrations, not as salary benchmarks.
+This model is trained on a small 500-row dataset that appears synthetic — correlations are unusually clean and feature distributions are overly rounded. As a result, the R² of 0.95 likely overstates real-world performance. The model captures base salary only and ignores bonus, equity, location cost-of-living, and market trends. The app's displayed range is a typical-error band based on test MAE, not a calibrated prediction interval. Gender fairness analysis shows a predicted gap, but this reflects confounding variables and small subgroup sizes rather than a causal or definitive model-bias finding. All results should be treated as educational demonstrations, not as salary benchmarks.
 
 ---

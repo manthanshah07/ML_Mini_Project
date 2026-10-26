@@ -6,6 +6,7 @@ All feature engineering and encoding happens INSIDE the pipeline so that
 no information leaks from the test set into the training set.
 """
 
+import hashlib
 import pathlib
 from typing import Tuple
 
@@ -35,7 +36,10 @@ EDUCATION_ORDER = ["High School", "Bachelor's", "Master's", "PhD"]
 JOB_LEVEL_ORDER = ["Junior", "Mid", "Senior", "Lead", "Manager"]
 
 # Feature groups
-NUMERIC_FEATURES = ["Age", "Years_Experience", "Certifications_Count", "Skills_Count"]
+# Age is represented by Age_minus_Exp below. Keeping both Age and
+# Age_minus_Exp would create an exact linear dependency because
+# Age_minus_Exp = Age - Years_Experience.
+NUMERIC_FEATURES = ["Years_Experience", "Certifications_Count", "Skills_Count"]
 ENGINEERED_FEATURES = [
     "Age_minus_Exp",       # proxy for "years before starting work"
     "Skills_per_Cert",     # skills density per certification
@@ -114,7 +118,11 @@ def _make_column_transformer(scale_numeric: bool = False) -> ColumnTransformer:
             ),
             (
                 "ohe",
-                OneHotEncoder(handle_unknown="ignore", sparse_output=False),
+                OneHotEncoder(
+                    drop="first",
+                    handle_unknown="ignore",
+                    sparse_output=False,
+                ),
                 OHE_FEATURES,
             ),
             (
@@ -155,6 +163,15 @@ def load_data(path: pathlib.Path = DATA_PATH) -> pd.DataFrame:
     """Load the raw salary CSV."""
     df = pd.read_csv(path)
     return df
+
+
+def data_sha256(path: pathlib.Path = DATA_PATH) -> str:
+    """Return a stable hash for detecting stale model artifacts."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def get_feature_names(pipeline: Pipeline) -> list[str]:

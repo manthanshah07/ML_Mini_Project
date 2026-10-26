@@ -24,7 +24,8 @@ def make_eda_notebook() -> None:
                           "outliers, and key insights."),
         new_code_cell(
             "import sys, pathlib\n"
-            "sys.path.insert(0, str(pathlib.Path('.').resolve().parent))\n"
+            "ROOT = next(p for p in [pathlib.Path.cwd(), *pathlib.Path.cwd().parents] if (p / 'src').is_dir())\n"
+            "sys.path.insert(0, str(ROOT))\n"
             "from scripts.eda import main\n"
             "main()"
         ),
@@ -33,7 +34,8 @@ def make_eda_notebook() -> None:
             "import matplotlib.pyplot as plt\n"
             "import matplotlib.image as mpimg\n"
             "import pathlib\n\n"
-            "figs_dir = pathlib.Path('../reports/figures')\n"
+            "ROOT = next(p for p in [pathlib.Path.cwd(), *pathlib.Path.cwd().parents] if (p / 'reports').is_dir())\n"
+            "figs_dir = ROOT / 'reports' / 'figures'\n"
             "fig_names = sorted(figs_dir.glob('*.png'))\n\n"
             "for fp in fig_names:\n"
             "    img = mpimg.imread(fp)\n"
@@ -72,7 +74,8 @@ def make_modeling_notebook() -> None:
         new_markdown_cell("## 1. Training"),
         new_code_cell(
             "import sys, pathlib\n"
-            "sys.path.insert(0, str(pathlib.Path('.').resolve().parent))\n"
+            "ROOT = next(p for p in [pathlib.Path.cwd(), *pathlib.Path.cwd().parents] if (p / 'src').is_dir())\n"
+            "sys.path.insert(0, str(ROOT))\n"
             "from src.train import main as train_main\n"
             "train_main()"
         ),
@@ -111,7 +114,8 @@ def make_modeling_notebook() -> None:
         new_markdown_cell("## 5. Model Comparison Table"),
         new_code_cell(
             "import pandas as pd, pathlib\n"
-            "df = pd.read_csv(pathlib.Path('../reports/model_comparison.csv'), index_col=0)\n"
+            "ROOT = next(p for p in [pathlib.Path.cwd(), *pathlib.Path.cwd().parents] if (p / 'reports').is_dir())\n"
+            "df = pd.read_csv(ROOT / 'reports' / 'model_comparison.csv', index_col=0)\n"
             "df.style.highlight_min(subset=['CV_MAE_mean_INR'], color='lightgreen')"
         ),
     ]

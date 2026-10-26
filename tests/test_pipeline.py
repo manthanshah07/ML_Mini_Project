@@ -154,6 +154,13 @@ class TestPipeline:
             f"Feature names ({len(names)}) != columns ({X_tr.shape[1]})"
         )
 
+    def test_linear_features_do_not_keep_exact_age_dependency(self, fitted_pipeline):
+        pipe, _, _ = fitted_pipeline
+        names = get_feature_names(pipe)
+        assert "Age" not in names
+        assert "Age_minus_Exp" in names
+        assert not {"Gender_Female", "Gender_Male"}.issubset(names)
+
     def test_scaled_pipeline_different(self, split):
         """Scaled pipeline should produce different numeric values for same input."""
         X_train, X_test, _, _ = split
@@ -191,6 +198,15 @@ class TestOrdinalEncoding:
         # Check that the fitted order matches EDUCATION_ORDER
         for i, level in enumerate(EDUCATION_ORDER):
             assert level in cats, f"{level} not found in encoder categories"
+        encoded = ordinal_enc.transform(
+            pd.DataFrame(
+                {
+                    "Education_Level": EDUCATION_ORDER,
+                    "Job_Level": [JOB_LEVEL_ORDER[0]] * len(EDUCATION_ORDER),
+                }
+            )
+        )
+        assert np.all(np.diff(encoded[:, 0]) > 0)
 
     def test_job_level_monotone(self, fitted_pipeline):
         pipe, X_train, _ = fitted_pipeline
@@ -199,6 +215,15 @@ class TestOrdinalEncoding:
         cats = ordinal_enc.categories_[1]  # Job_Level
         for level in JOB_LEVEL_ORDER:
             assert level in cats, f"{level} not found in Job_Level categories"
+        encoded = ordinal_enc.transform(
+            pd.DataFrame(
+                {
+                    "Education_Level": [EDUCATION_ORDER[0]] * len(JOB_LEVEL_ORDER),
+                    "Job_Level": JOB_LEVEL_ORDER,
+                }
+            )
+        )
+        assert np.all(np.diff(encoded[:, 1]) > 0)
 
 
 # ── Predict module tests (requires trained model) ─────────────────────────────
@@ -296,6 +321,28 @@ class TestPredict:
         warnings = validate_profile(invalid_sample)
         assert len(warnings) > 0
         assert "exceeds career span" in warnings[0]
+
+    def test_validate_profile_rejects_invalid_values(self):
+        from src.predict import validate_profile
+
+        profile = {
+            "Age": 19,
+            "Gender": "Unknown",
+            "Education_Level": "Bachelor's",
+            "Years_Experience": 0,
+            "Job_Title": "Data Scientist",
+            "Job_Level": "Junior",
+            "Industry": "IT",
+            "City": "Bangalore",
+            "Company_Size": "Startup",
+            "Work_Mode": "Hybrid",
+            "Certifications_Count": 2,
+            "Skills_Count": 1,
+        }
+        errors = validate_profile(profile)
+        assert any("Age must be between" in error for error in errors)
+        assert any("Invalid Gender" in error for error in errors)
+        assert any("Skills_Count must be between" in error for error in errors)
 
     def test_predict_with_interval(self):
         from src.predict import predict_with_interval

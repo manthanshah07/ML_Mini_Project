@@ -17,7 +17,7 @@ Run with:
 import json
 import pathlib
 import warnings
-from typing import Tuple
+from typing import Any, Tuple
 
 import joblib
 import matplotlib.pyplot as plt
@@ -25,11 +25,13 @@ import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 import shap
+from sklearn.compose import TransformedTargetRegressor
 from sklearn.inspection import permutation_importance
 
 from src.preprocess import (
     DATA_PATH,
     RANDOM_STATE,
+    data_sha256,
     get_feature_names,
     load_data,
     split_data,
@@ -128,7 +130,7 @@ def plot_shap(
     X_train: pd.DataFrame,
     X_test: pd.DataFrame,
     best_name: str,
-) -> Tuple[shap.Explanation, Any]:
+) -> Tuple[Any, Any, list[str]]:
     """Compute SHAP values and produce summary + bar plots."""
     preprocess_pipe = estimator.named_steps["preprocess"]
     feature_names = get_feature_names(preprocess_pipe)
@@ -140,6 +142,7 @@ def plot_shap(
     model_step = estimator.named_steps["model"]
     inner_model = getattr(model_step, "regressor_", model_step)
     model_type = type(inner_model).__name__
+    target_label = "log-salary" if isinstance(model_step, TransformedTargetRegressor) else "salary"
 
     if model_type in ("RandomForestRegressor", "XGBRegressor", "GradientBoostingRegressor"):
         bg = shap.utils.sample(X_train_t, 100, random_state=RANDOM_STATE)
@@ -153,7 +156,6 @@ def plot_shap(
     fn = feature_names[:X_test_t.shape[1]]
 
     # ── SHAP Beeswarm (summary) ───────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(9, 7))
     shap.summary_plot(
         shap_values.values if hasattr(shap_values, "values") else shap_values,
         X_test_t,
@@ -162,7 +164,7 @@ def plot_shap(
         max_display=20,
         plot_size=None,
     )
-    plt.title(f"SHAP Summary Plot — {best_name} (Impact on log-salary)", fontsize=12, pad=12)
+    plt.title(f"SHAP Summary Plot — {best_name} (Impact on {target_label})", fontsize=12, pad=12)
     plt.tight_layout()
     path = FIGURES_DIR / "shap_summary.png"
     plt.savefig(path, dpi=DPI, bbox_inches="tight")
@@ -170,7 +172,6 @@ def plot_shap(
     print(f"  Saved: {path}")
 
     # ── SHAP Bar (mean |SHAP|) ────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(9, 6))
     shap.summary_plot(
         shap_values.values if hasattr(shap_values, "values") else shap_values,
         X_test_t,
@@ -255,9 +256,20 @@ def fairness_check(
 def main() -> None:
     print("Loading data and artifacts …")
     df = load_data(DATA_PATH)
-    X_train, X_test, y_train, y_test = split_data(df)
 
     estimator, meta = _load_artifacts()
+    expected_hash = meta.get("data_sha256")
+    if expected_hash and expected_hash != data_sha256(DATA_PATH):
+        raise RuntimeError(
+            "The dataset has changed since training. Retrain before explaining."
+        )
+
+    split_path = MODELS_DIR / "test_split.joblib"
+    if split_path.exists():
+        X_test, y_test = joblib.load(split_path)
+        X_train = df.drop(columns=["Salary_INR"]).drop(index=X_test.index)
+    else:
+        X_train, X_test, _, y_test = split_data(df)
     best_name: str = meta["best_model"]
     print(f"Best model: {best_name}")
 
