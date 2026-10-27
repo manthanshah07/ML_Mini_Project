@@ -154,27 +154,45 @@ def get_shap_values_for_input(estimator, explainer, input_dict: dict, feature_na
             return None, None
 
 
-def plot_factor_bar(factors: pd.DataFrame) -> plt.Figure:
+def plot_factor_bar(factors: pd.DataFrame, is_dark: bool = False) -> plt.Figure:
     """Render a clean INR comparison against a typical training profile."""
     factors = factors.sort_values("impact_inr")
     labels = [f"{row.label} · {row.value}" for row in factors.itertuples()]
     values = factors["impact_inr"].to_numpy() / 1e5
-    colors = ["#356F68" if value >= 0 else "#C56A54" for value in values]
+
+    if is_dark:
+        bg_color = "#142420"
+        text_color = "#F0F5F2"
+        label_color = "#D4E4DE"
+        axis_color = "#ADC2B9"
+        grid_color = "#253C35"
+        spine_color = "#2A433C"
+        zero_line_color = "#5A776E"
+        colors = ["#4ECDC4" if value >= 0 else "#F87171" for value in values]
+    else:
+        bg_color = "#F7F5F0"
+        text_color = "#1F2A2E"
+        label_color = "#34423D"
+        axis_color = "#52615C"
+        grid_color = "#D9DDD7"
+        spine_color = "#B8C1BB"
+        zero_line_color = "#8A9690"
+        colors = ["#2C6E63" if value >= 0 else "#C56A54" for value in values]
 
     fig, ax = plt.subplots(figsize=(7.2, 4.8))
-    fig.patch.set_facecolor("#F7F5F0")
-    ax.set_facecolor("#F7F5F0")
+    fig.patch.set_facecolor(bg_color)
+    ax.set_facecolor(bg_color)
     ax.barh(labels, values, color=colors, height=0.58)
-    ax.axvline(0, color="#8A9690", linewidth=0.9)
-    ax.set_xlabel("Change in estimate versus a typical profile (₹ lakhs)", color="#52615C")
+    ax.axvline(0, color=zero_line_color, linewidth=0.9)
+    ax.set_xlabel("Change in estimate versus a typical profile (₹ lakhs)", color=axis_color, fontsize=9.5)
     ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda value, _: f"₹{value:.1f}L"))
-    ax.tick_params(axis="both", colors="#34423D", labelsize=9)
-    ax.grid(axis="x", color="#D9DDD7", linewidth=0.8)
+    ax.tick_params(axis="both", colors=label_color, labelsize=9)
+    ax.grid(axis="x", color=grid_color, linewidth=0.8)
     ax.set_axisbelow(True)
     for spine in ("top", "right", "left"):
         ax.spines[spine].set_visible(False)
-    ax.spines["bottom"].set_color("#B8C1BB")
-    ax.set_title("What changes this estimate?", loc="left", color="#1F2A2E", fontsize=12, pad=12)
+    ax.spines["bottom"].set_color(spine_color)
+    ax.set_title("What changes this estimate?", loc="left", color=text_color, fontsize=12, fontweight="bold", pad=12)
     plt.tight_layout()
     return fig
 
@@ -182,68 +200,284 @@ def plot_factor_bar(factors: pd.DataFrame) -> plt.Figure:
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    /* ── Light palette (default) ─────────────────────────────────────────── */
+    /* ── Light Palette (Default) ─────────────────────────────────────────── */
     :root {
-        --ink:         #1F2A2E;
-        --muted:       #64736D;
-        --paper:       #F7F5F0;
-        --line:        #D9DDD7;
-        --teal:        #356F68;
-        --surface:     rgba(255,255,255,.42);
-        --metric-bg:   #FFFFFF;
-        --header-bg:   transparent;
-        --card-bg:     #FFFFFF;
-        --card-border: #D9DDD7;
+        --ink:            #1F2A2E;
+        --muted:          #556861;
+        --paper:          #F7F5F0;
+        --line:           #D9DDD7;
+        --teal:           #2C6E63;
+        --teal-hover:     #22564D;
+        --surface:        rgba(255, 255, 255, 0.65);
+        --input-bg:       #FFFFFF;
+        --input-border:   #D0D7D3;
+        --metric-bg:      #FFFFFF;
+        --card-bg:        #FFFFFF;
+        --card-border:    #E0E6E2;
+        --card-title:     #235A52;
+        --card-text:      #455751;
+        --card-shadow:    0 2px 10px rgba(0, 0, 0, 0.05);
+        --info-bg:        #E8F4F0;
+        --info-border:    #BCE0D7;
+        --header-bg:      transparent;
     }
-    /* ── Dark mode overrides (Streamlit dark theme attribute) ────────────── */
-    [data-theme="dark"] {
-        --ink:         #E8F0ED;
-        --muted:       #A8B8B2;
-        --paper:       #0E1A17;
-        --line:        #2E3D38;
-        --surface:     rgba(255,255,255,.06);
-        --metric-bg:   #1E2D2A;
-        --header-bg:   #0E1A17;
-        --card-bg:     #1A2A26;
-        --card-border: #2E3D38;
-    }
-    /* ── Dark mode fallback (OS-level preference) ────────────────────────── */
+
+    /* ── Dark Mode Overrides (Streamlit theme & OS preference) ───────────── */
     @media (prefers-color-scheme: dark) {
         :root {
-            --ink:         #E8F0ED;
-            --muted:       #A8B8B2;
-            --paper:       #0E1A17;
-            --line:        #2E3D38;
-            --surface:     rgba(255,255,255,.06);
-            --metric-bg:   #1E2D2A;
-            --header-bg:   #0E1A17;
-            --card-bg:     #1A2A26;
-            --card-border: #2E3D38;
+            --ink:            #F0F5F2;
+            --muted:          #ADC2B9;
+            --paper:          #0D1714;
+            --line:           #263B34;
+            --teal:           #4ECDC4;
+            --teal-hover:     #3DBDB4;
+            --surface:        rgba(20, 36, 32, 0.65);
+            --input-bg:       #152521;
+            --input-border:   #2B433C;
+            --metric-bg:      #142420;
+            --card-bg:        #142420;
+            --card-border:    #253C35;
+            --card-title:     #5EEAD4;
+            --card-text:      #D5E4DE;
+            --card-shadow:    0 4px 18px rgba(0, 0, 0, 0.28);
+            --info-bg:        #132A24;
+            --info-border:    #224D42;
+            --header-bg:      #0D1714;
         }
     }
-    .stApp { background: var(--paper); color: var(--ink); }
-    [data-testid="stHeader"] { background: var(--header-bg); }
-    .block-container { max-width: 1180px; padding-top: 3rem; padding-bottom: 4rem; }
-    .eyebrow { color: var(--teal); font-size: .75rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
-    .intro { border-bottom: 1px solid var(--line); padding-bottom: 1.5rem; margin-bottom: 2rem; }
-    .intro h1 { color: var(--ink); font-size: 2.8rem; letter-spacing: -.04em; margin: .35rem 0 .5rem; }
-    .intro p { color: var(--muted); font-size: 1rem; max-width: 42rem; margin: 0; }
-    .section-note { color: var(--muted); font-size: .88rem; margin-top: -.5rem; }
-    div[data-testid="stForm"] { border: 1px solid var(--line); border-radius: 14px; padding: 1.35rem 1.5rem; background: var(--surface); }
-    [data-testid="stMetric"] { background: var(--metric-bg); border: 1px solid var(--line); border-radius: 12px; padding: 1rem; }
-    [data-testid="stMetricLabel"] { color: var(--muted); }
-    [data-testid="stMetricValue"] { color: var(--teal); }
-    .fine-print { color: var(--muted); font-size: .8rem; line-height: 1.5; }
-    .stButton > button { background: var(--teal); border: 0; border-radius: 8px; color: white; font-weight: 600; }
-    .stButton > button:hover { background: #285B55; color: white; }
-    /* ── Use-case cards ──────────────────────────────────────────────────── */
-    .use-case-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 1rem 1.1rem; height: 100%; }
-    .use-case-card .card-icon { font-size: 1.6rem; line-height: 1; margin-bottom: .45rem; display: block; }
-    .use-case-card .card-title { color: var(--teal); font-weight: 700; font-size: .9rem; margin-bottom: .3rem; }
-    .use-case-card .card-body { color: var(--muted); font-size: .82rem; line-height: 1.45; }
-    /* ── st.info override ────────────────────────────────────────────────── */
-    [data-testid="stNotification"] { background: color-mix(in srgb, var(--teal) 12%, var(--paper)); border-left: 3px solid var(--teal); }
-    [data-testid="stNotification"] p { color: var(--ink) !important; }
+
+    [data-theme="dark"] {
+        --ink:            #F0F5F2;
+        --muted:          #ADC2B9;
+        --paper:          #0D1714;
+        --line:           #263B34;
+        --teal:           #4ECDC4;
+        --teal-hover:     #3DBDB4;
+        --surface:        rgba(20, 36, 32, 0.65);
+        --input-bg:       #152521;
+        --input-border:   #2B433C;
+        --metric-bg:      #142420;
+        --card-bg:        #142420;
+        --card-border:    #253C35;
+        --card-title:     #5EEAD4;
+        --card-text:      #D5E4DE;
+        --card-shadow:    0 4px 18px rgba(0, 0, 0, 0.28);
+        --info-bg:        #132A24;
+        --info-border:    #224D42;
+        --header-bg:      #0D1714;
+    }
+
+    /* ── Base App Layout & Typography ────────────────────────────────────── */
+    .stApp {
+        background-color: var(--paper) !important;
+        color: var(--ink) !important;
+    }
+    [data-testid="stHeader"] {
+        background: var(--header-bg) !important;
+    }
+    .block-container {
+        max-width: 1180px;
+        padding-top: 2.8rem;
+        padding-bottom: 4rem;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        color: var(--ink) !important;
+    }
+    .eyebrow {
+        color: var(--teal) !important;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+    }
+    .intro {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 1.5rem;
+        margin-bottom: 2rem;
+    }
+    .intro h1 {
+        color: var(--ink) !important;
+        font-size: 2.7rem;
+        letter-spacing: -0.04em;
+        margin: 0.35rem 0 0.5rem;
+    }
+    .intro p {
+        color: var(--muted) !important;
+        font-size: 1.02rem;
+        max-width: 44rem;
+        margin: 0;
+        line-height: 1.55;
+    }
+    .section-note {
+        color: var(--muted) !important;
+        font-size: 0.88rem;
+        margin-top: -0.35rem;
+        margin-bottom: 0.9rem;
+    }
+    .fine-print {
+        color: var(--muted) !important;
+        font-size: 0.82rem;
+        line-height: 1.5;
+    }
+    .stCaption, [data-testid="stCaptionContainer"] p {
+        color: var(--muted) !important;
+    }
+
+    /* ── Use-Case Cards Grid (Clean layout, no vertical sticking) ────────── */
+    .use-cases-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1.15rem;
+        margin-top: 0.8rem;
+        margin-bottom: 2.2rem;
+    }
+    .use-case-card {
+        background: var(--card-bg);
+        border: 1px solid var(--card-border);
+        border-radius: 14px;
+        padding: 1.15rem 1.1rem;
+        box-shadow: var(--card-shadow);
+        display: flex;
+        flex-direction: column;
+        transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+    .use-case-card:hover {
+        transform: translateY(-2px);
+        border-color: var(--teal);
+    }
+    .use-case-card .card-icon {
+        font-size: 1.75rem;
+        line-height: 1;
+        margin-bottom: 0.55rem;
+        display: block;
+    }
+    .use-case-card .card-title {
+        color: var(--card-title) !important;
+        font-weight: 700;
+        font-size: 0.94rem;
+        margin-bottom: 0.35rem;
+        line-height: 1.35;
+    }
+    .use-case-card .card-body {
+        color: var(--card-text) !important;
+        font-size: 0.83rem;
+        line-height: 1.48;
+        flex-grow: 1;
+    }
+
+    /* ── Form Container ──────────────────────────────────────────────────── */
+    div[data-testid="stForm"] {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 1.5rem 1.6rem;
+        background: var(--surface);
+        box-shadow: var(--card-shadow);
+    }
+
+    /* ── Form Labels (Fixes Invisible Black-on-Dark Labels) ──────────────── */
+    [data-testid="stWidgetLabel"],
+    [data-testid="stWidgetLabel"] label,
+    [data-testid="stWidgetLabel"] p,
+    [data-testid="stWidgetLabel"] span {
+        color: var(--ink) !important;
+        font-weight: 600 !important;
+        font-size: 0.92rem !important;
+        opacity: 1 !important;
+    }
+
+    /* ── Selectbox / Dropdowns (Fixes Stark White Boxes) ─────────────────── */
+    div[data-baseweb="select"] > div {
+        background-color: var(--input-bg) !important;
+        border: 1px solid var(--input-border) !important;
+        border-radius: 9px !important;
+    }
+    div[data-baseweb="select"] span,
+    div[data-baseweb="select"] div {
+        color: var(--ink) !important;
+    }
+    div[data-baseweb="select"] svg {
+        fill: var(--ink) !important;
+    }
+    ul[data-testid="stSelectboxVirtualDropdown"],
+    ul[role="listbox"],
+    div[data-baseweb="popover"] > div {
+        background-color: var(--input-bg) !important;
+        border: 1px solid var(--input-border) !important;
+    }
+    ul[role="listbox"] li,
+    ul[data-testid="stSelectboxVirtualDropdown"] li {
+        color: var(--ink) !important;
+    }
+
+    /* ── Sliders (Fixes Invisible Values & Ticks) ────────────────────────── */
+    div[data-testid="stSlider"] div[data-testid="stThumbValue"] {
+        color: var(--ink) !important;
+        font-weight: 600 !important;
+    }
+    div[data-testid="stSliderTickBar"] span {
+        color: var(--muted) !important;
+    }
+
+    /* ── Submit Button ───────────────────────────────────────────────────── */
+    .stButton > button {
+        background: var(--teal) !important;
+        border: 0 !important;
+        border-radius: 9px !important;
+        color: #FFFFFF !important;
+        font-weight: 600 !important;
+        padding: 0.55rem 1.2rem !important;
+        transition: background 0.15s ease, transform 0.1s ease;
+    }
+    .stButton > button:hover {
+        background: var(--teal-hover) !important;
+        transform: translateY(-1px);
+    }
+
+    /* ── Metric Card ─────────────────────────────────────────────────────── */
+    [data-testid="stMetric"] {
+        background: var(--metric-bg) !important;
+        border: 1px solid var(--line) !important;
+        border-radius: 14px !important;
+        padding: 1.1rem 1.25rem !important;
+        box-shadow: var(--card-shadow);
+    }
+    [data-testid="stMetricLabel"] {
+        color: var(--muted) !important;
+        font-size: 0.88rem !important;
+    }
+    [data-testid="stMetricValue"] {
+        color: var(--teal) !important;
+        font-size: 1.85rem !important;
+        font-weight: 700 !important;
+    }
+
+    /* ── Info / Notification Banner ──────────────────────────────────────── */
+    [data-testid="stNotification"] {
+        background: var(--info-bg) !important;
+        border: 1px solid var(--info-border) !important;
+        border-left: 4px solid var(--teal) !important;
+        border-radius: 12px !important;
+        padding: 0.85rem 1.1rem !important;
+    }
+    [data-testid="stNotification"] p,
+    [data-testid="stNotification"] div {
+        color: var(--ink) !important;
+        font-size: 0.92rem !important;
+    }
+
+    /* ── Expander ────────────────────────────────────────────────────────── */
+    [data-testid="stExpander"] {
+        background: var(--surface) !important;
+        border: 1px solid var(--line) !important;
+        border-radius: 12px !important;
+    }
+    [data-testid="stExpander"] summary {
+        color: var(--ink) !important;
+    }
+    [data-testid="stExpander"] summary svg {
+        fill: var(--ink) !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -309,7 +543,7 @@ with st.expander("About this model"):
 # ── Real-World Use Cases ───────────────────────────────────────────────────────
 st.subheader("📌 Real-World Use Cases")
 st.markdown(
-    "<div class='section-note'>Who this tool is built for — and how they would use it.</div>",
+    "<div class='section-note'>Who this tool is built for — and how each persona uses the simulation.</div>",
     unsafe_allow_html=True,
 )
 
@@ -317,61 +551,41 @@ _USE_CASES = [
     (
         "🎓",
         "Job Seeker / Fresher",
-        "Enter your own profile to check whether your salary expectation is "
-        "realistic for your city, experience, and education level.",
+        "Enter your profile to evaluate whether an offer is competitive for your role, city, and experience level.",
     ),
     (
         "👩‍💼",
         "HR / Hiring Manager",
-        "Estimate a competitive offer for any role, level, and location — "
-        "data-backed and adjusted for company size.",
+        "Benchmark competitive compensation for any role and location, calibrated by company tier.",
     ),
     (
         "📚",
         "Career Counsellor",
-        "Swap education or job level to show clients the exact INR impact "
-        "of a higher degree or a promotion.",
+        "Simulate education and promotion moves to quantify the expected salary increment in INR.",
     ),
     (
         "📊",
         "Compensation Analyst",
-        "Compare salary estimates across industries, company sizes, and "
-        "cities for the same role — side by side.",
+        "Compare pay trends across sectors, tiers, and work arrangements for identical job roles.",
     ),
     (
         "🏫",
         "Student / Educator",
-        "A live end-to-end ML demo: raw data → 5 models → SHAP "
-        "explainability → deployed web app.",
+        "Full ML pipeline simulation: feature engineering, 5-model cross-validation, and SHAP explainability.",
     ),
 ]
 
-_uc_row1 = st.columns(3, gap="medium")
-_uc_row2 = st.columns(2, gap="medium")
+cards_html = '<div class="use-cases-grid">'
+for _icon, _title, _body in _USE_CASES:
+    cards_html += f"""
+    <div class="use-case-card">
+        <span class="card-icon">{_icon}</span>
+        <div class="card-title">{_title}</div>
+        <div class="card-body">{_body}</div>
+    </div>"""
+cards_html += "</div>"
 
-for _col, (_icon, _title, _body) in zip(_uc_row1, _USE_CASES[:3]):
-    with _col:
-        st.markdown(
-            f"""<div class="use-case-card">
-                <span class="card-icon" style="font-size:1.6rem;line-height:1;display:block;margin-bottom:.45rem">{_icon}</span>
-                <div class="card-title">{_title}</div>
-                <div class="card-body">{_body}</div>
-            </div>""",
-            unsafe_allow_html=True,
-        )
-
-for _col, (_icon, _title, _body) in zip(_uc_row2, _USE_CASES[3:]):
-    with _col:
-        st.markdown(
-            f"""<div class="use-case-card">
-                <span class="card-icon" style="font-size:1.6rem;line-height:1;display:block;margin-bottom:.45rem">{_icon}</span>
-                <div class="card-title">{_title}</div>
-                <div class="card-body">{_body}</div>
-            </div>""",
-            unsafe_allow_html=True,
-        )
-
-st.markdown("<div style='margin-bottom:1.5rem'></div>", unsafe_allow_html=True)
+st.markdown(cards_html, unsafe_allow_html=True)
 
 st.subheader("Build a profile")
 st.markdown("<div class='section-note'>All fields are used by the trained model.</div>", unsafe_allow_html=True)
@@ -456,7 +670,13 @@ if predict_btn:
 
     with exp_col:
         st.markdown("**What changes this estimate?**")
-        fig = plot_factor_bar(factors)
+        is_dark_mode = False
+        try:
+            if hasattr(st, "context") and hasattr(st.context, "theme"):
+                is_dark_mode = st.context.theme.get("type") == "dark"
+        except Exception:
+            is_dark_mode = False
+        fig = plot_factor_bar(factors, is_dark=is_dark_mode)
         st.pyplot(fig, width="stretch")
         plt.close(fig)
         st.caption(
